@@ -1,2 +1,13 @@
-#Cpp recreation of gravity inside the solar System
-Cpp project that aims to recreate the solar system (with gravity) and a visual representation using opengl
+# Cpp recreation of gravity inside the solar System
+In this project I aim to simulate gravity with Cpp and a visual reppresentation in opengl.
+
+# To Run the project you will need:
+- g++ compiler
+- library glfw3.dll installed or inside the directory of this project
+- make
+
+# Once ensured everything is met, run:
+- make
+- cd bin
+- ./solar_system
+
