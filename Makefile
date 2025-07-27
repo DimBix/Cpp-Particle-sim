@@ -4,19 +4,29 @@
 CXX = g++
 
 # Compiler flags
-CXXFLAGS = -std=c++11 -Wall -Wextra -O3
-
-# Linker flags
-LDFLAGS = -lglfw -lm
+CXXFLAGS = -I$(INCLUDE_DIR) -std=c++11 -Wall -Wextra -O3
 
 # Source files
-SRC = main.cpp
+SRC = $(SRC_DIR)/main.cpp
 
 # Output executable
-TARGET = $(BIN_DIR)/solar_system
+TARGET = $(BIN_DIR)/gravity_sim
 
-# Output directory
+ifeq ($(OS),Windows_NT)
+	LIBS = -glfw3
+	LDFLAGS = -lm -lGL -lX11 -lpthread -lXrandr -lXi -ldl -L$(LIBS_DIR) $(LIBS)
+else
+	LDFLAGS = -lglfw -lm -lGL -lX11 -lpthread -lXrandr -lXi -ldl
+endif
+
+# -------- Directories --------
+
 BIN_DIR = bin
+SRC_DIR = src
+INCLUDE_DIR = Dependencies/include
+LIBS_DIR = Dependencies/libs
+
+# -------- Directories --------
 
 # Build target
 all: create_bin_dir $(TARGET)
