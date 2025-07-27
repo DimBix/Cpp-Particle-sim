@@ -7,7 +7,7 @@ CXX = g++
 CXXFLAGS = -I$(INCLUDE_DIR) -std=c++11 -Wall -Wextra -O3
 
 # Source files
-SRC = $(SRC_DIR)/main.cpp
+SRC = $(SRC_DIR)/*.cpp $(SRC_DIR)/*.c
 
 # Output executable
 TARGET = $(BIN_DIR)/gravity_sim
