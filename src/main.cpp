@@ -223,22 +223,20 @@ int main(void) {
 
 
     std::vector<float> velocity(NUMCIRCLES * 2, 0.0f);
-    std::vector<int> mass(NUMCIRCLES, 1);
-    std::vector<int> gravityX(NUMCIRCLES, 0);
-    std::vector<int> gravityY(NUMCIRCLES, 0);
+    std::vector<float> mass(NUMCIRCLES, 1.0f);
+    std::vector<float> forceX(NUMCIRCLES, 0.0f);
+    std::vector<float> forceY(NUMCIRCLES, 0.0f);
 
-    float sumGravityX, sumGravityY;
     float deltaTime = 0.0f;
     float lastTime = 0.0f;
     float currentTime;
     float dx, dy;  // Changed from int to float for proper calculations
     float distance;
-    float angle;
     
     // Pre-declare variables used in loops for better performance
     float distanceSquared, invDistance, nx, ny, overlap;
     float separationX, separationY, relativeVelX, relativeVelY, velAlongNormal, impulse;
-    float gravityDeltaX, gravityDeltaY;
+    float force, accelerationX, accelerationY;
     
     // Pre-calculate constants for optimization
     const float radiusSum = 2.0f * radius;
@@ -248,16 +246,13 @@ int main(void) {
     const float wallBottom = -1.0f + radius;
     const float wallTop = 1.0f - radius;
     
-    // Initialize with some random velocities
-    /*std::uniform_real_distribution<float> velDist(-2.0f, 2.0f);
+    // Initialize with some random velocities and masses
+    std::uniform_real_distribution<float> velDist(-1.0f, 1.0f);
+    std::uniform_real_distribution<float> massDist(1.0f, 3.0f);
     for (int i = 0; i < NUMCIRCLES; i++) {
         velocity[i * 2] = velDist(gen);     // Random X velocity
         velocity[i * 2 + 1] = velDist(gen); // Random Y velocity
-    }*/
-
-    std::uniform_int_distribution<int> massDist(1, 2);
-    for (int i = 0; i < NUMCIRCLES; i++) {
-        mass[i] = massDist(gen); // Random mass between 1 and 10
+        mass[i] = massDist(gen);            // Random mass between 1 and 3
     }
 
 
@@ -266,6 +261,38 @@ int main(void) {
         currentTime = glfwGetTime();
         deltaTime = currentTime - lastTime;
         lastTime = currentTime;
+        
+        // Reset gravitational forces for this frame
+        std::fill(forceX.begin(), forceX.end(), 0.0f);
+        std::fill(forceY.begin(), forceY.end(), 0.0f);
+        
+        // Calculate gravitational forces between all pairs
+        for (int i = 0; i < NUMCIRCLES; i++) {
+            for (int j = 0; j < NUMCIRCLES; j++) {
+                if (i == j) continue; // Skip self-interaction
+                
+                dx = positions[j * 2] - positions[i * 2];         // Vector from i to j
+                dy = positions[j * 2 + 1] - positions[i * 2 + 1]; // Vector from i to j
+                
+                distanceSquared = dx * dx + dy * dy;
+                
+                // Avoid division by zero and very close distances
+                if (distanceSquared < 0.001f) continue;
+                
+                distance = sqrt(distanceSquared);
+                
+                // Newton's Law of Gravitation: F = G * m1 * m2 / r^2
+                force = GRAVITATIONAL_CONSTANT * mass[i] * mass[j] / distanceSquared;
+                
+                // Calculate unit direction vector (from i to j)
+                nx = dx / distance;
+                ny = dy / distance;
+                
+                // Apply gravitational force to object i
+                forceX[i] += force * nx;
+                forceY[i] += force * ny;
+            }
+        }
  
         // Circle-to-circle collision detection (optimized)
         for (int i = 0; i < NUMCIRCLES; i++) {
@@ -275,14 +302,6 @@ int main(void) {
                 
                 // Quick distance check using squared distance (avoid sqrt)
                 distanceSquared = dx * dx + dy * dy;
-                
-                if(i != j && distanceSquared > 0.0001f ){
-                    angle = atan2(dy, dx);
-                    printf("angle: %f\n", angle);
-                    printf("Distance Squared: %f\n", distanceSquared);
-                    gravityX[j] = (mass[j]/distanceSquared) * GRAVITATIONAL_CONSTANT * cos(angle);
-                    gravityY[j] = (mass[j]/distanceSquared) * GRAVITATIONAL_CONSTANT * sin(angle);
-                }
                 
                 // Check if circles are colliding using squared distance
                 if(distanceSquared < radiusSumSquared && distanceSquared > 0.0001f) { // Avoid division by zero
@@ -326,16 +345,15 @@ int main(void) {
         }
         
 
+        // Physics updates for each circle
         for (int i = 0; i < NUMCIRCLES; i++) {
-            sumGravityX = std::accumulate(gravityX.begin(), gravityX.end(), 0.0f);
-            sumGravityY = std::accumulate(gravityY.begin(), gravityY.end(), 0.0f);
-
-            gravityDeltaY = sumGravityY * deltaTime;
-            gravityDeltaX = sumGravityX * deltaTime;
-
-            // Apply gravity effect (only to Y velocity)
-            velocity[i * 2 + 1] -= gravityDeltaY;
-            velocity[i * 2] -= gravityDeltaX;
+            // Calculate acceleration from gravitational force (F = ma, so a = F/m)
+            accelerationX = forceX[i] / mass[i];
+            accelerationY = forceY[i] / mass[i];
+            
+            // Update velocity with acceleration
+            velocity[i * 2] += accelerationX * deltaTime;
+            velocity[i * 2 + 1] += accelerationY * deltaTime;
             
             // Update positions based on velocity
             positions[i * 2] += velocity[i * 2] * deltaTime;         // x position
