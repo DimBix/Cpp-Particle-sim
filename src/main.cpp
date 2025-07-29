@@ -5,13 +5,16 @@
 #include <iostream>
 #include <cmath>
 #include <random>
+#include <numeric>
+#define GRAVITATIONAL_CONSTANT 0.1f
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void processInput(GLFWwindow *window);
 
 int SRC_HEIGHT = 480;
 int SRC_WIDTH = 640;
-int NUMCIRCLES = 10; // Number of circles to simulate
+int NUMCIRCLES = 2; // Number of circles to simulate
+
 
 const char *vertexShaderSource = "#version 330 core\n"
     "layout (location = 0) in vec3 aPos;\n"
@@ -220,17 +223,22 @@ int main(void) {
 
 
     std::vector<float> velocity(NUMCIRCLES * 2, 0.0f);
-    const float gravity = 9.8f;
+    std::vector<int> mass(NUMCIRCLES, 1);
+    std::vector<int> gravityX(NUMCIRCLES, 0);
+    std::vector<int> gravityY(NUMCIRCLES, 0);
+
+    float sumGravityX, sumGravityY;
     float deltaTime = 0.0f;
     float lastTime = 0.0f;
     float currentTime;
     float dx, dy;  // Changed from int to float for proper calculations
     float distance;
+    float angle;
     
     // Pre-declare variables used in loops for better performance
     float distanceSquared, invDistance, nx, ny, overlap;
     float separationX, separationY, relativeVelX, relativeVelY, velAlongNormal, impulse;
-    float gravityDelta;
+    float gravityDeltaX, gravityDeltaY;
     
     // Pre-calculate constants for optimization
     const float radiusSum = 2.0f * radius;
@@ -241,11 +249,17 @@ int main(void) {
     const float wallTop = 1.0f - radius;
     
     // Initialize with some random velocities
-    std::uniform_real_distribution<float> velDist(-1.0f, 1.0f);
+    /*std::uniform_real_distribution<float> velDist(-2.0f, 2.0f);
     for (int i = 0; i < NUMCIRCLES; i++) {
         velocity[i * 2] = velDist(gen);     // Random X velocity
         velocity[i * 2 + 1] = velDist(gen); // Random Y velocity
+    }*/
+
+    std::uniform_int_distribution<int> massDist(1, 2);
+    for (int i = 0; i < NUMCIRCLES; i++) {
+        mass[i] = massDist(gen); // Random mass between 1 and 10
     }
+
 
     // render loop
     while (!glfwWindowShouldClose(window)) {
@@ -261,6 +275,14 @@ int main(void) {
                 
                 // Quick distance check using squared distance (avoid sqrt)
                 distanceSquared = dx * dx + dy * dy;
+                
+                if(i != j && distanceSquared > 0.0001f ){
+                    angle = atan2(dy, dx);
+                    printf("angle: %f\n", angle);
+                    printf("Distance Squared: %f\n", distanceSquared);
+                    gravityX[j] = (mass[j]/distanceSquared) * GRAVITATIONAL_CONSTANT * cos(angle);
+                    gravityY[j] = (mass[j]/distanceSquared) * GRAVITATIONAL_CONSTANT * sin(angle);
+                }
                 
                 // Check if circles are colliding using squared distance
                 if(distanceSquared < radiusSumSquared && distanceSquared > 0.0001f) { // Avoid division by zero
@@ -303,12 +325,17 @@ int main(void) {
             }
         }
         
-        // Update physics for each circle (optimized)
-        gravityDelta = gravity * deltaTime; // Calculate once
 
         for (int i = 0; i < NUMCIRCLES; i++) {
+            sumGravityX = std::accumulate(gravityX.begin(), gravityX.end(), 0.0f);
+            sumGravityY = std::accumulate(gravityY.begin(), gravityY.end(), 0.0f);
+
+            gravityDeltaY = sumGravityY * deltaTime;
+            gravityDeltaX = sumGravityX * deltaTime;
+
             // Apply gravity effect (only to Y velocity)
-            velocity[i * 2 + 1] -= gravityDelta;
+            velocity[i * 2 + 1] -= gravityDeltaY;
+            velocity[i * 2] -= gravityDeltaX;
             
             // Update positions based on velocity
             positions[i * 2] += velocity[i * 2] * deltaTime;         // x position
