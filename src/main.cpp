@@ -11,7 +11,7 @@ void processInput(GLFWwindow *window);
 
 int SRC_HEIGHT = 480;
 int SRC_WIDTH = 640;
-int NUMCIRCLES = 5; // Number of circles to simulate
+int NUMCIRCLES = 10; // Number of circles to simulate
 
 const char *vertexShaderSource = "#version 330 core\n"
     "layout (location = 0) in vec3 aPos;\n"
@@ -217,7 +217,6 @@ int main(void) {
 
     // Unbind VAO
     glBindVertexArray(0);
-    
 
 
     std::vector<float> velocity(NUMCIRCLES * 2, 0.0f);
@@ -225,9 +224,24 @@ int main(void) {
     float deltaTime = 0.0f;
     float lastTime = 0.0f;
     float currentTime;
+    float dx, dy;  // Changed from int to float for proper calculations
+    float distance;
+    
+    // Pre-declare variables used in loops for better performance
+    float distanceSquared, invDistance, nx, ny, overlap;
+    float separationX, separationY, relativeVelX, relativeVelY, velAlongNormal, impulse;
+    float gravityDelta;
+    
+    // Pre-calculate constants for optimization
+    const float radiusSum = 2.0f * radius;
+    const float radiusSumSquared = radiusSum * radiusSum;
+    const float wallLeft = -1.0f + radius;
+    const float wallRight = 1.0f - radius;
+    const float wallBottom = -1.0f + radius;
+    const float wallTop = 1.0f - radius;
     
     // Initialize with some random velocities
-    std::uniform_real_distribution<float> velDist(-2.0f, 2.0f);
+    std::uniform_real_distribution<float> velDist(-1.0f, 1.0f);
     for (int i = 0; i < NUMCIRCLES; i++) {
         velocity[i * 2] = velDist(gen);     // Random X velocity
         velocity[i * 2 + 1] = velDist(gen); // Random Y velocity
@@ -239,33 +253,84 @@ int main(void) {
         deltaTime = currentTime - lastTime;
         lastTime = currentTime;
  
-        // Update only position data (no redundant radius/color updates)
+        // Circle-to-circle collision detection (optimized)
         for (int i = 0; i < NUMCIRCLES; i++) {
-            
+            for(int j = i + 1; j < NUMCIRCLES; j++) { // Only check each pair once
+                dx = positions[i * 2] - positions[j * 2];
+                dy = positions[i * 2 + 1] - positions[j * 2 + 1];
+                
+                // Quick distance check using squared distance (avoid sqrt)
+                distanceSquared = dx * dx + dy * dy;
+                
+                // Check if circles are colliding using squared distance
+                if(distanceSquared < radiusSumSquared && distanceSquared > 0.0001f) { // Avoid division by zero
+                    // Only calculate sqrt when we know there's a collision
+                    distance = sqrt(distanceSquared);
+                    
+                    // Normalize the collision vector
+                    invDistance = 1.0f / distance;  // Cache inverse
+                    nx = dx * invDistance;  // Normal X component
+                    ny = dy * invDistance;  // Normal Y component
+                    
+                    // Separate the circles to prevent overlap
+                    overlap = radiusSum - distance;
+                    separationX = nx * overlap * 0.5f;
+                    separationY = ny * overlap * 0.5f;
+                    
+                    positions[i * 2] += separationX;
+                    positions[i * 2 + 1] += separationY;
+                    positions[j * 2] -= separationX;
+                    positions[j * 2 + 1] -= separationY;
+                    
+                    // Calculate relative velocity
+                    relativeVelX = velocity[i * 2] - velocity[j * 2];
+                    relativeVelY = velocity[i * 2 + 1] - velocity[j * 2 + 1];
+                    
+                    // Calculate relative velocity in collision normal direction
+                    velAlongNormal = relativeVelX * nx + relativeVelY * ny;
+                    
+                    // Do not resolve if velocities are separating
+                    if(velAlongNormal > 0) continue;
+                    
+                    // Apply elastic collision response (equal mass assumption)
+                    impulse = velAlongNormal;
+                    
+                    velocity[i * 2] -= impulse * nx;
+                    velocity[i * 2 + 1] -= impulse * ny;
+                    velocity[j * 2] += impulse * nx;
+                    velocity[j * 2 + 1] += impulse * ny;
+                }
+            }
+        }
+        
+        // Update physics for each circle (optimized)
+        gravityDelta = gravity * deltaTime; // Calculate once
+
+        for (int i = 0; i < NUMCIRCLES; i++) {
             // Apply gravity effect (only to Y velocity)
-            //velocity[i * 2 + 1] -= gravity * deltaTime;
+            velocity[i * 2 + 1] -= gravityDelta;
             
             // Update positions based on velocity
             positions[i * 2] += velocity[i * 2] * deltaTime;         // x position
             positions[i * 2 + 1] += velocity[i * 2 + 1] * deltaTime; // y position
             
-            // Bounce off left and right walls
-            if(positions[i * 2] <= (-1.0f + radius)) {
-                positions[i * 2] = -1.0f + radius;
+            // Bounce off left and right walls (using pre-calculated constants)
+            if(positions[i * 2] <= wallLeft) {
+                positions[i * 2] = wallLeft;
                 velocity[i * 2] = -velocity[i * 2]; // Simply reverse X velocity
             }
-            else if(positions[i * 2] >= (1.0f - radius)) {
-                positions[i * 2] = 1.0f - radius;
+            else if(positions[i * 2] >= wallRight) {
+                positions[i * 2] = wallRight;
                 velocity[i * 2] = -velocity[i * 2]; // Simply reverse X velocity
             }
             
-            // Bounce off top and bottom walls
-            if(positions[i * 2 + 1] <= (-1.0f + radius)) {
-                positions[i * 2 + 1] = -1.0f + radius;
+            // Bounce off top and bottom walls (using pre-calculated constants)
+            if(positions[i * 2 + 1] <= wallBottom) {
+                positions[i * 2 + 1] = wallBottom;
                 velocity[i * 2 + 1] = -velocity[i * 2 + 1]; // Simply reverse Y velocity
             }
-            else if(positions[i * 2 + 1] >= (1.0f - radius)) {
-                positions[i * 2 + 1] = 1.0f - radius;
+            else if(positions[i * 2 + 1] >= wallTop) {
+                positions[i * 2 + 1] = wallTop;
                 velocity[i * 2 + 1] = -velocity[i * 2 + 1]; // Simply reverse Y velocity
             }
         }
