@@ -6,14 +6,18 @@
 #include <cmath>
 #include <random>
 #include <numeric>
-#define GRAVITATIONAL_CONSTANT 0.1f
+#include <chrono>
+#include <unistd.h>  // For usleep()
+#define GRAVITATIONAL_CONSTANT 0.02f  // Reduced for more realistic movement
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void processInput(GLFWwindow *window);
+void generatePositionsAndStaticData(std::vector<float>& positions, std::vector<float>& radiusColorData);
 
 int SRC_HEIGHT = 480;
 int SRC_WIDTH = 640;
-int NUMCIRCLES = 2; // Number of circles to simulate
+const int NUMCIRCLES = 5; // Number of circles to simulate
+const float radius = 0.05f;
 
 
 const char *vertexShaderSource = "#version 330 core\n"
@@ -59,6 +63,9 @@ int main(void) {
     }
 
     glfwMakeContextCurrent(window);
+    
+    // Enable V-Sync to limit to monitor refresh rate (usually 60 FPS)
+    glfwSwapInterval(0);  // 1 = enable V-Sync, 0 = disable
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         std::cout << "Failed to initialize GLAD" << std::endl;
@@ -72,7 +79,7 @@ int main(void) {
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback); 
 
     // Generate circle vertices
-    const int segments = 32;
+    const int segments = 16;
     std::vector<float> circleVertices;
     
     // Center vertex
@@ -98,32 +105,12 @@ int main(void) {
     // Close the circle
     indices[indices.size() - 1] = 1;
 
-    // Separate dynamic and static instance data
-    std::vector<float> basePositions;     // Relative positions (dynamic)
-    std::vector<float> positions;         // Actual positions (updated each frame)
-    std::vector<float> radiusColorData;   // Radius + Color (static)
-    const float radius = 0.05f;
-    
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<float> posDist(-0.3f, 0.3f);  // Relative to group center
-    std::uniform_real_distribution<float> colorDist(0.0f, 1.0f);
-    
-    for (int i = 0; i < NUMCIRCLES; i++) {
-        // Base relative positions (2 floats per circle)
-        basePositions.push_back(posDist(gen));
-        basePositions.push_back(posDist(gen));
-        
-        // Initialize actual positions
-        positions.push_back(basePositions[i * 2]);
-        positions.push_back(basePositions[i * 2 + 1]);
-        
-        // Static radius + color data (4 floats per circle)
-        radiusColorData.push_back(radius);                // Radius
-        radiusColorData.push_back(colorDist(gen));       // R
-        radiusColorData.push_back(colorDist(gen));       // G
-        radiusColorData.push_back(colorDist(gen));       // B
-    }
+
+    // Generate positions and static data for instances
+    std::vector<float> positions;
+    std::vector<float> radiusColorData;   
+    generatePositionsAndStaticData(positions, radiusColorData);
+
 
     // Create buffers
     unsigned int VBO, VAO, EBO, positionVBO, radiusColorVBO;
@@ -224,76 +211,70 @@ int main(void) {
 
     std::vector<float> velocity(NUMCIRCLES * 2, 0.0f);
     std::vector<float> mass(NUMCIRCLES, 1.0f);
-    std::vector<float> forceX(NUMCIRCLES, 0.0f);
-    std::vector<float> forceY(NUMCIRCLES, 0.0f);
 
-    float deltaTime = 0.0f;
-    float lastTime = 0.0f;
-    float currentTime;
+
+    // Frame rate limiting variables
+    const float TARGET_FPS = 60.0f;
+    const float TARGET_FRAME_TIME = 1.0f / TARGET_FPS;  // ~0.0167 seconds per frame
+    
+    float frameTime;
+    
     float dx, dy;  // Changed from int to float for proper calculations
     float distance;
     
     // Pre-declare variables used in loops for better performance
     float distanceSquared, invDistance, nx, ny, overlap;
     float separationX, separationY, relativeVelX, relativeVelY, velAlongNormal, impulse;
-    float force, accelerationX, accelerationY;
     
     // Pre-calculate constants for optimization
     const float radiusSum = 2.0f * radius;
+    const float gravity = 9.81f;
     const float radiusSumSquared = radiusSum * radiusSum;
     const float wallLeft = -1.0f + radius;
     const float wallRight = 1.0f - radius;
     const float wallBottom = -1.0f + radius;
     const float wallTop = 1.0f - radius;
     
-    // Initialize with some random velocities and masses
-    std::uniform_real_distribution<float> velDist(-1.0f, 1.0f);
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    // Initialize with some random velocities and masses (reduced for slower movement)
+    std::uniform_real_distribution<float> velDist(-0.2f, 0.2f);  // Much smaller initial velocities
     std::uniform_real_distribution<float> massDist(1.0f, 3.0f);
     for (int i = 0; i < NUMCIRCLES; i++) {
-        velocity[i * 2] = velDist(gen);     // Random X velocity
+        velocity[i * 2] = velDist(gen);     // For random use velDist(gen) X velocity
         velocity[i * 2 + 1] = velDist(gen); // Random Y velocity
-        mass[i] = massDist(gen);            // Random mass between 1 and 3
+        mass[i] = 1.0f;            // Random mass between 1 and 3
     }
 
+    //mass[3] = 100.0f;
+
+    // FPS check
+    int frames = 0;
+    bool reset = false;
+    
+   
+    auto frameStartTime = std::chrono::steady_clock::now();
+    auto lastTime = frameStartTime;
+    auto timer = frameStartTime;
+    float deltaTime = 0.0f;
+
+    int count = 0, sum = 0, low, peak, mean;
 
     // render loop
     while (!glfwWindowShouldClose(window)) {
-        currentTime = glfwGetTime();
-        deltaTime = currentTime - lastTime;
-        lastTime = currentTime;
-        
-        // Reset gravitational forces for this frame
-        std::fill(forceX.begin(), forceX.end(), 0.0f);
-        std::fill(forceY.begin(), forceY.end(), 0.0f);
-        
-        // Calculate gravitational forces between all pairs
-        for (int i = 0; i < NUMCIRCLES; i++) {
-            for (int j = 0; j < NUMCIRCLES; j++) {
-                if (i == j) continue; // Skip self-interaction
-                
-                dx = positions[j * 2] - positions[i * 2];         // Vector from i to j
-                dy = positions[j * 2 + 1] - positions[i * 2 + 1]; // Vector from i to j
-                
-                distanceSquared = dx * dx + dy * dy;
-                
-                // Avoid division by zero and very close distances
-                if (distanceSquared < 0.001f) continue;
-                
-                distance = sqrt(distanceSquared);
-                
-                // Newton's Law of Gravitation: F = G * m1 * m2 / r^2
-                force = GRAVITATIONAL_CONSTANT * mass[i] * mass[j] / distanceSquared;
-                
-                // Calculate unit direction vector (from i to j)
-                nx = dx / distance;
-                ny = dy / distance;
-                
-                // Apply gravitational force to object i
-                forceX[i] += force * nx;
-                forceY[i] += force * ny;
-            }
+        frameStartTime = std::chrono::steady_clock::now();
+        std::chrono::duration<float> deltaTimeDuration;
+        deltaTimeDuration = frameStartTime - lastTime;
+        deltaTime = deltaTimeDuration.count();
+        lastTime = frameStartTime;
+
+        if(reset){
+            timer = lastTime;
+            std::cout << "reset avvenuto !!"  << std::endl;
+            reset = false;
         }
- 
+
+
         // Circle-to-circle collision detection (optimized)
         for (int i = 0; i < NUMCIRCLES; i++) {
             for(int j = i + 1; j < NUMCIRCLES; j++) { // Only check each pair once
@@ -334,7 +315,7 @@ int main(void) {
                     if(velAlongNormal > 0) continue;
                     
                     // Apply elastic collision response (equal mass assumption)
-                    impulse = velAlongNormal;
+                    impulse = 2.0f * velAlongNormal / (mass[i] + mass[j]);
                     
                     velocity[i * 2] -= impulse * nx;
                     velocity[i * 2 + 1] -= impulse * ny;
@@ -345,16 +326,11 @@ int main(void) {
         }
         
 
-        // Physics updates for each circle
         for (int i = 0; i < NUMCIRCLES; i++) {
-            // Calculate acceleration from gravitational force (F = ma, so a = F/m)
-            accelerationX = forceX[i] / mass[i];
-            accelerationY = forceY[i] / mass[i];
             
-            // Update velocity with acceleration
-            velocity[i * 2] += accelerationX * deltaTime;
-            velocity[i * 2 + 1] += accelerationY * deltaTime;
-            
+            // Update velocity with acceleration (increased damping for stability)
+            velocity[i * 2 + 1] -= gravity * deltaTime * 0.6f;
+
             // Update positions based on velocity
             positions[i * 2] += velocity[i * 2] * deltaTime;         // x position
             positions[i * 2 + 1] += velocity[i * 2 + 1] * deltaTime; // y position
@@ -396,10 +372,40 @@ int main(void) {
         // process input from keyboard
         processInput(window);
 
+        // Frame rate limiting (using usleep for CPU efficiency)
+        //frameTime = glfwGetTime() - frameStartTime;
+        //if (frameTime < TARGET_FRAME_TIME) {
+            // Calculate remaining time in microseconds (usleep uses microseconds)
+            //float remainingTime = TARGET_FRAME_TIME - frameTime;
+            //int sleepMicroseconds = (int)(5 * 1000000.0f);
+            //if (sleepMicroseconds > 0) {
+            //    usleep(sleepMicroseconds);
+            //}
+        //}
+
         glfwSwapBuffers(window);
         glfwPollEvents();
+
+        frames++;
+        if(std::chrono::steady_clock::now() - timer > std::chrono::seconds(1)){
+            std::cout << "FPS: " << frames << std::endl;
+            if(count == 0)
+                low = frames;
+            if(frames > peak)
+                peak = frames;
+            if(frames < low)
+                low = frames;
+            sum += frames;
+            count++;
+            mean = sum / count;
+            reset = true;
+            frames = 0;
+        }
+
+
     }
 
+    std::cout << "FPS peak: " << peak << ">> FPS low: " << low << ">> FPS mean: " << mean << std::endl;
 
     glfwTerminate();
     return 0;
@@ -417,4 +423,24 @@ void processInput(GLFWwindow *window)
 {
     if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
+}
+
+void generatePositionsAndStaticData(std::vector<float>& positions, std::vector<float>& radiusColorData) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<float> posDist(-0.3f, 0.3f);  // Relative to group center
+    std::uniform_real_distribution<float> colorDist(0.0f, 1.0f);
+
+    positions.clear();
+    radiusColorData.clear();
+    for (int i = 0; i < NUMCIRCLES; i++) {
+        
+        positions.push_back(posDist(gen)); // X position
+        positions.push_back(posDist(gen)); // Y position
+
+        radiusColorData.push_back(radius);                // Radius
+        radiusColorData.push_back(colorDist(gen));       // R
+        radiusColorData.push_back(colorDist(gen));       // G
+        radiusColorData.push_back(colorDist(gen));       // B
+    }
 }
