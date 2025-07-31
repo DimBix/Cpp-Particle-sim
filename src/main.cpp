@@ -21,7 +21,7 @@ int creatingShaderProgram(unsigned int, unsigned int, unsigned int);
 
 int SRC_HEIGHT = 640;
 int SRC_WIDTH = 640;
-const int NUMCIRCLES = 10; // Number of circles to simulate
+const int NUMCIRCLES = 1000; // Number of circles to simulate
 const float radius = 0.025f;
 
 // Circle spawning settings
@@ -29,10 +29,14 @@ const float SPAWN_INTERVAL_MS = 50.0f;
 
 // Frame rate limiting variables
 const float TARGET_FPS = 60.0f;
-const float UPDATER_PER_FRAME = 1.0f;
+const float UPDATER_PER_FRAME = 4.0f;
 const float deltaTime = (1.0f / TARGET_FPS) / UPDATER_PER_FRAME; 
 
-
+//spawning velocity
+const float velocityX = 5.1f; // X velocity for spawning circles
+const float velocityY = 2.4f; // Y velocity for spawning circles
+float angle = atan2(velocityY, -velocityX);
+bool reducing = true; // Flag to control angle reduction
 
 const char *vertexShaderSource = "#version 330 core\n"
     "layout (location = 0) in vec3 aPos;\n"
@@ -111,6 +115,9 @@ int main(void) {
     const float wallTop = 1.0f - radius;
     const float damping = 0.75f;
 
+    // distance calculation variables
+    float dx, dy, distanceSquared, distance, invDistance, nx, ny, overlap;
+
     // spawning circles
     int remainingCirclesToSpawn = NUMCIRCLES - 1;
 
@@ -155,7 +162,6 @@ int main(void) {
             reset = false;
         }
 
-        // Fixed timestep physics with 8 updates per frame
         for (int physicsStep = 0; physicsStep < UPDATER_PER_FRAME; physicsStep++) {
             // Update positions based on Verlet integration
             for (int i = 0; i < NUMCIRCLES - remainingCirclesToSpawn; i++){
@@ -198,7 +204,26 @@ int main(void) {
                 }
             }
 
+            //Collision between objects
+            for(int i = 0; i < NUMCIRCLES -  remainingCirclesToSpawn; i++){
+                for(int j = 0; j < NUMCIRCLES -  remainingCirclesToSpawn; j++){
+                    dx = positions[i * 2] - positions[j * 2];
+                    dy = positions[i * 2 + 1] - positions[j * 2 + 1];
 
+                    distanceSquared = dx * dx + dy * dy;
+                    
+                    if(distanceSquared < radiusSumSquared && distanceSquared > 0.0001f) { // Avoid division by zero
+                        distance = sqrt(distanceSquared);
+                        overlap = radiusSum - distance;
+
+                        
+                        positions[i * 2] += (dx / distance) * (overlap) * 0.5f;
+                        positions[i * 2 + 1] += (dy / distance) * (overlap) * 0.5f;
+                        positions[j * 2] -= (dx / distance) * (overlap) * 0.5f;
+                        positions[j * 2 + 1] -= (dy / distance) * (overlap) * 0.5f;
+                    }
+                }
+            }
         }
 
         glBindBuffer(GL_ARRAY_BUFFER, positionVBO);
@@ -263,10 +288,10 @@ void processInput(GLFWwindow *window)
 
 void generatePositionsAndStaticData(std::vector<float>& lastPositions, std::vector<float>& positions, std::vector<float>& radiusColorData, std::vector<float>& acceleration) {
 
-    positions.push_back(-0.9f); // X position
-    positions.push_back(0.9f); // Y position
-    lastPositions.push_back(-0.9f); // X position
-    lastPositions.push_back(0.9f);
+    positions.push_back(0.0f); // X position
+    positions.push_back(0.5f); // Y position
+    lastPositions.push_back(0.0f); // X position
+    lastPositions.push_back(0.5f);
 
     acceleration.push_back(0.0f);     // 0 m/s^2 on X
     acceleration.push_back(-3.0f);    // gravity on Y (increased for visibility)
@@ -277,9 +302,11 @@ void generatePositionsAndStaticData(std::vector<float>& lastPositions, std::vect
     radiusColorData.push_back(1.0f);
 
     // setting up velocity this way we use the formula (xn - x(n-1))/deltaT = v
+    // static method
     int currentCircleIndex = (positions.size() / 2) - 1; // Get the index of the circle we just added
-    lastPositions[currentCircleIndex * 2] = positions[currentCircleIndex * 2] - 4.1f * deltaTime;
-    lastPositions[currentCircleIndex * 2 + 1] = positions[currentCircleIndex * 2 + 1] + 2.4f * deltaTime;
+    lastPositions[currentCircleIndex * 2] = positions[currentCircleIndex * 2] - velocityX * deltaTime;
+    lastPositions[currentCircleIndex * 2 + 1] = positions[currentCircleIndex * 2 + 1] + velocityY * deltaTime;
+
 }
 
 void genAndBindBuffers(unsigned int& VAO, unsigned int& positionVBO, unsigned int& radiusColorVBO, std::vector<float>& positions, std::vector<float>& radiusColorData, std::vector<unsigned int>& indices, std::vector<float>& circleVertices){
