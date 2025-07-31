@@ -12,7 +12,7 @@
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void processInput(GLFWwindow *window);
 void generatePositionsAndStaticData(std::vector<float>&, std::vector<float>&, std::vector<float>&, std::vector<float>& );
-void genAndBindBuffers(unsigned int&, unsigned int&, std::vector<float>&, std::vector<float>&, std::vector<unsigned int>&, std::vector<float>&);
+void genAndBindBuffers(unsigned int&, unsigned int&, unsigned int&, std::vector<float>&, std::vector<float>&, std::vector<unsigned int>&, std::vector<float>&);
 int initWindow(GLFWwindow *window);
 void creatingCircles(std::vector<float>&, std::vector<unsigned int>&);
 int creatingVertexShader(unsigned int);
@@ -21,13 +21,16 @@ int creatingShaderProgram(unsigned int, unsigned int, unsigned int);
 
 int SRC_HEIGHT = 640;
 int SRC_WIDTH = 640;
-const int NUMCIRCLES = 5; // Number of circles to simulate
+const int NUMCIRCLES = 100; // Number of circles to simulate
 const float radius = 0.025f;
+
+// Circle spawning settings
+const float SPAWN_INTERVAL_MS = 50.0f;  // Spawn a circle every 500ms (0.5 seconds)
 
 // Frame rate limiting variables
 const float TARGET_FPS = 60.0f;
-const float UPDATER_PER_FRAME = 8.0f;
-const float deltaTime = (1.0f / TARGET_FPS) / UPDATER_PER_FRAME;
+const float UPDATER_PER_FRAME = 1.0f;
+const float deltaTime = (1.0f / TARGET_FPS) / UPDATER_PER_FRAME;  // Should be ~0.002083
 
 
 
@@ -69,9 +72,9 @@ int main(void) {
     initWindow(window);
     
     std::vector<float> circleVertices, positions, lastPositions, radiusColorData;
-    std::vector<float> velocity(NUMCIRCLES * 2, 0.0f), acceleration(NUMCIRCLES * 2, 0.0f);
+    std::vector<float> acceleration;
 
-    unsigned int VAO, positionVBO, vertexShader, fragmentShader, shaderProgram;
+    unsigned int VAO, positionVBO, radiusColorVBO, vertexShader, fragmentShader, shaderProgram;
 
     positions.clear();
     radiusColorData.clear();
@@ -82,8 +85,8 @@ int main(void) {
 
     // generate position of first circle and static data for instances
     generatePositionsAndStaticData(lastPositions, positions, radiusColorData, acceleration);
-    
-    genAndBindBuffers(VAO, positionVBO, positions, radiusColorData, indices, circleVertices);
+
+    genAndBindBuffers(VAO, positionVBO, radiusColorVBO, positions, radiusColorData, indices, circleVertices);
 
     vertexShader = creatingVertexShader(vertexShader);
 
@@ -111,13 +114,14 @@ int main(void) {
     int remainingCirclesToSpawn = NUMCIRCLES - 1;
 
     // FPS check
-    int frames = 0;
+    int frames = 1;
     bool reset = false;
     
     auto frameStartTime = std::chrono::steady_clock::now();
     auto lastTime = frameStartTime;
     std::chrono::duration<float> deltaTimeDuration;
-    auto timer = frameStartTime;
+    auto fpsTimer = frameStartTime;  // Separate timer for FPS counter
+    auto spawnTimer = frameStartTime; // Separate timer for circle spawning
     float actualDeltaTime = 0.0f;
 
     // render loop
@@ -129,61 +133,68 @@ int main(void) {
         actualDeltaTime = deltaTimeDuration.count();
 
 
-        // spawn a circle (if they are not over) every 0.25 seconds
-        auto timeFromLastSpawn = frameStartTime - timer;
-        if(remainingCirclesToSpawn > 0 && timeFromLastSpawn >= std::chrono::nanoseconds(250000000)){
+        // spawn a circle (if they are not over) every SPAWN_INTERVAL_MS milliseconds
+        auto timeFromLastSpawn = frameStartTime - spawnTimer;
+        auto spawnInterval = std::chrono::milliseconds(static_cast<int>(SPAWN_INTERVAL_MS));
+        if(remainingCirclesToSpawn > 0 && timeFromLastSpawn >= spawnInterval){
             generatePositionsAndStaticData(lastPositions, positions, radiusColorData, acceleration);
             remainingCirclesToSpawn--;
+            spawnTimer = frameStartTime; // Reset spawn timer after spawning a circle
+            
+            // Update radius/color buffer with new data
+            glBindBuffer(GL_ARRAY_BUFFER, radiusColorVBO);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, radiusColorData.size() * sizeof(float), radiusColorData.data());
         }
 
         // reset the timer for the frame counter
         if(reset){
-            timer = lastTime;
+            fpsTimer = lastTime;
             reset = false;
         }
 
-        
-        // wall collisions
-        for (int i = 0; i < NUMCIRCLES - remainingCirclesToSpawn; i++) {
-            
-            // Bounce off left and right walls (using pre-calculated constants)
-            if(positions[i * 2] <= wallLeft) {
-                positions[i * 2] = wallLeft;
-
-                velocity[i * 2] = -velocity[i * 2]; // Simply reverse X velocity
+        // Fixed timestep physics with 8 updates per frame
+        for (int physicsStep = 0; physicsStep < UPDATER_PER_FRAME; physicsStep++) {
+            // Update positions based on Verlet integration
+            for (int i = 0; i < NUMCIRCLES - remainingCirclesToSpawn; i++){
+                // Store current position as next frame's lastPosition
+                float tempX = positions[i * 2];
+                float tempY = positions[i * 2 + 1];
+                
+                // Verlet integration: x(n+1) = 2*x(n) - x(n-1) + a*dt^2
+                positions[i * 2] = 2.0f * positions[i * 2] - lastPositions[i * 2] + acceleration[i * 2] * deltaTime * deltaTime;
+                positions[i * 2 + 1] = 2.0f * positions[i * 2 + 1] - lastPositions[i * 2 + 1] + acceleration[i * 2 + 1] * deltaTime * deltaTime;
+                
+                // Update lastPositions for next frame
+                lastPositions[i * 2] = tempX;
+                lastPositions[i * 2 + 1] = tempY;
             }
-            else if(positions[i * 2] >= wallRight) {
-                positions[i * 2] = wallRight;
-
-                velocity[i * 2] = -velocity[i * 2]; // Simply reverse X velocity
-            }
             
-            // Bounce off top and bottom walls (using pre-calculated constants)
-            if(positions[i * 2 + 1] <= wallBottom) {
-                positions[i * 2 + 1] = wallBottom;
-
-                velocity[i * 2 + 1] = -velocity[i * 2 + 1]; // Simply reverse Y velocity
+            // Wall collisions (after position update)
+            for (int i = 0; i < NUMCIRCLES - remainingCirclesToSpawn; i++) {
+                // Bounce off left and right walls
+                if(positions[i * 2] <= wallLeft) {
+                    positions[i * 2] = wallLeft;
+                    // For Verlet integration, reverse velocity by reflecting lastPosition
+                    lastPositions[i * 2] = positions[i * 2] + (positions[i * 2] - lastPositions[i * 2]); // 0.8f for damping
+                }
+                else if(positions[i * 2] >= wallRight) {
+                    positions[i * 2] = wallRight;
+                    // Reverse velocity: subtract the velocity difference instead of adding
+                    lastPositions[i * 2] = positions[i * 2] + (positions[i * 2] - lastPositions[i * 2]);
+                }
+                
+                // Bounce off top and bottom walls
+                if(positions[i * 2 + 1] <= wallBottom) {
+                    positions[i * 2 + 1] = wallBottom;
+                    lastPositions[i * 2 + 1] = positions[i * 2 + 1] + (positions[i * 2 + 1] - lastPositions[i * 2 + 1]);
+                }
+                else if(positions[i * 2 + 1] >= wallTop) {
+                    positions[i * 2 + 1] = wallTop;
+                    lastPositions[i * 2 + 1] = positions[i * 2 + 1] + (positions[i * 2 + 1] - lastPositions[i * 2 + 1]);
+                }
             }
-            else if(positions[i * 2 + 1] >= wallTop) {
-                positions[i * 2 + 1] = wallTop;
 
-                velocity[i * 2 + 1] = -velocity[i * 2 + 1]; // Simply reverse Y velocity
-            }
-        }
-        
-       // Update positions based on Verlet integration
-        for (int i = 0; i < NUMCIRCLES - remainingCirclesToSpawn; i++){
-            // Store current position as next frame's lastPosition
-            float tempX = positions[i * 2];
-            float tempY = positions[i * 2 + 1];
-            
-            // Verlet integration: x(n+1) = 2*x(n) - x(n-1) + a*dt^2
-            positions[i * 2] = 2.0f * positions[i * 2] - lastPositions[i * 2] + acceleration[i * 2] * deltaTime * deltaTime;
-            positions[i * 2 + 1] = 2.0f * positions[i * 2 + 1] - lastPositions[i * 2 + 1] + acceleration[i * 2 + 1] * deltaTime * deltaTime;
-            
-            // Update lastPositions for next frame
-            lastPositions[i * 2] = tempX;
-            lastPositions[i * 2 + 1] = tempY;
+
         }
 
         glBindBuffer(GL_ARRAY_BUFFER, positionVBO);
@@ -202,22 +213,26 @@ int main(void) {
         // process input from keyboard
         processInput(window);
 
+        // Frame rate limiting to 60 FPS with fixed timestep
+        auto frameEndTime = std::chrono::steady_clock::now();
+        auto frameTime = frameEndTime - frameStartTime;
+        auto targetFrameTime = std::chrono::duration<float>(1.0f / TARGET_FPS);
         
-        // frameTime = glfwGetTime() - frameStartTime;
-        // if (frameTime < TARGET_FRAME_TIME) {
-        //     float remainingTime = TARGET_FRAME_TIME - frameTime;
-        //     int sleepMicroseconds = (int)(remainingTime * 1000000.0f);
-        //     if (sleepMicroseconds > 0) {
-        //        usleep(sleepMicroseconds);
-        //     }
-        // }
+        if (frameTime < targetFrameTime) {
+            auto remainingTime = targetFrameTime - frameTime;
+            auto sleepMicroseconds = std::chrono::duration_cast<std::chrono::microseconds>(remainingTime);
+            if (sleepMicroseconds.count() > 0) {
+                usleep(sleepMicroseconds.count());
+            }
+        }
 
         frames++;
-        if(std::chrono::steady_clock::now() - timer > std::chrono::seconds(1)){
+        if(std::chrono::steady_clock::now() - fpsTimer > std::chrono::seconds(1)){
             std::string title = "FPS: " + std::to_string(static_cast<int>(frames));
             glfwSetWindowTitle(window, title.c_str());
+
             reset = true;
-            frames = 0;
+            frames = 1;
         }
 
         glfwSwapBuffers(window);
@@ -249,25 +264,22 @@ void generatePositionsAndStaticData(std::vector<float>& lastPositions, std::vect
     lastPositions.push_back(-0.9f); // X position
     lastPositions.push_back(0.9f);
 
-    acceleration.push_back(0.0f);   // 0 m/s^2 on X
-    acceleration.push_back(-9.81f);  // gravity on Y
+    acceleration.push_back(0.0f);     // 0 m/s^2 on X
+    acceleration.push_back(-3.0f);    // gravity on Y (increased for visibility)
 
     radiusColorData.push_back(radius);
     radiusColorData.push_back(1.0f);
     radiusColorData.push_back(1.0f);
     radiusColorData.push_back(1.0f);
 
-    float velocityX = 0.3f; // Initial velocity
-    float velocityY = -0.3f; // Initial velocity
-
     // setting up velocity this way we use the formula (xn - x(n-1))/deltaT = v
     int currentCircleIndex = (positions.size() / 2) - 1; // Get the index of the circle we just added
-    lastPositions[currentCircleIndex * 2] = positions[currentCircleIndex * 2] - velocityX * deltaTime;
-    lastPositions[currentCircleIndex * 2 + 1] = positions[currentCircleIndex * 2 + 1] - velocityY * deltaTime;
+    lastPositions[currentCircleIndex * 2] = positions[currentCircleIndex * 2] - 4.1f * deltaTime;
+    lastPositions[currentCircleIndex * 2 + 1] = positions[currentCircleIndex * 2 + 1] + 2.4f * deltaTime;
 }
 
-void genAndBindBuffers(unsigned int& VAO, unsigned int& positionVBO, std::vector<float>& positions, std::vector<float>& radiusColorData, std::vector<unsigned int>& indices, std::vector<float>& circleVertices){
-    unsigned int VBO,  EBO, radiusColorVBO;
+void genAndBindBuffers(unsigned int& VAO, unsigned int& positionVBO, unsigned int& radiusColorVBO, std::vector<float>& positions, std::vector<float>& radiusColorData, std::vector<unsigned int>& indices, std::vector<float>& circleVertices){
+    unsigned int VBO,  EBO;
 
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -289,18 +301,22 @@ void genAndBindBuffers(unsigned int& VAO, unsigned int& positionVBO, std::vector
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    // Bind and fill instance buffer for positions (dynamic data)
+    // Pre-allocate position buffer for maximum circles (NUMCIRCLES * 2 floats)
     glBindBuffer(GL_ARRAY_BUFFER, positionVBO);
-    glBufferData(GL_ARRAY_BUFFER, positions.size() * sizeof(float), positions.data(), GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, NUMCIRCLES * 2 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    // Upload current position data
+    glBufferSubData(GL_ARRAY_BUFFER, 0, positions.size() * sizeof(float), positions.data());
 
     // Set position attributes (location 1)
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(1);
     glVertexAttribDivisor(1, 1); // This makes it instanced
 
-    // Bind and fill instance buffer for radius and color (static data)
+    // Pre-allocate radius/color buffer for maximum circles (NUMCIRCLES * 4 floats)
     glBindBuffer(GL_ARRAY_BUFFER, radiusColorVBO);
-    glBufferData(GL_ARRAY_BUFFER, radiusColorData.size() * sizeof(float), radiusColorData.data(), GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, NUMCIRCLES * 4 * sizeof(float), nullptr, GL_STATIC_DRAW);
+    // Upload current radius/color data
+    glBufferSubData(GL_ARRAY_BUFFER, 0, radiusColorData.size() * sizeof(float), radiusColorData.data());
 
     // Set radius attributes (location 2)
     glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
