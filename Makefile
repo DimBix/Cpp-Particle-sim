@@ -10,7 +10,7 @@ CXXFLAGS = -I$(INCLUDE_DIR) -std=c++11 -Wall -Wextra -O3
 SRC = $(SRC_DIR)/*.cpp $(SRC_DIR)/*.c
 
 # Output executable
-TARGET = $(BIN_DIR)/gravity_sim
+TARGET = $(BIN_DIR)/particle_sim
 
 ifeq ($(OS),Windows_NT)
 	LIBS = -glfw3

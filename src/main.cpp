@@ -7,17 +7,28 @@
 #include <random>
 #include <numeric>
 #include <chrono>
-#include <unistd.h>  // For usleep()
-#define GRAVITATIONAL_CONSTANT 0.02f  // Reduced for more realistic movement
+#include <unistd.h>
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void processInput(GLFWwindow *window);
-void generatePositionsAndStaticData(std::vector<float>& positions, std::vector<float>& radiusColorData);
+void generatePositionsAndStaticData(std::vector<float>&, std::vector<float>&, std::vector<float>&, std::vector<float>& );
+void genAndBindBuffers(unsigned int&, unsigned int&, std::vector<float>&, std::vector<float>&, std::vector<unsigned int>&, std::vector<float>&);
+int initWindow(GLFWwindow *window);
+void creatingCircles(std::vector<float>&, std::vector<unsigned int>&);
+int creatingVertexShader(unsigned int);
+int creatingFragmentShader(unsigned int);
+int creatingShaderProgram(unsigned int, unsigned int, unsigned int);
 
-int SRC_HEIGHT = 480;
+int SRC_HEIGHT = 640;
 int SRC_WIDTH = 640;
 const int NUMCIRCLES = 5; // Number of circles to simulate
-const float radius = 0.05f;
+const float radius = 0.025f;
+
+// Frame rate limiting variables
+const float TARGET_FPS = 60.0f;
+const float UPDATER_PER_FRAME = 8.0f;
+const float deltaTime = (1.0f / TARGET_FPS) / UPDATER_PER_FRAME;
+
 
 
 const char *vertexShaderSource = "#version 330 core\n"
@@ -42,8 +53,8 @@ const char *fragmentShaderSource = "#version 330 core\n"
     "}\0";
 
 
-
 int main(void) {
+    
     if (!glfwInit())
         return -1;
 
@@ -54,66 +65,210 @@ int main(void) {
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
     #endif
     
-
-    GLFWwindow* window = glfwCreateWindow(SRC_WIDTH, SRC_HEIGHT, "Gravity Simulation", NULL, NULL);
-    if (!window) {
-        std::cout << "Failed to create GLFW window" << std::endl;
-        glfwTerminate();
-        return -1;
-    }
-
-    glfwMakeContextCurrent(window);
+    GLFWwindow* window = glfwCreateWindow(SRC_WIDTH, SRC_HEIGHT, "FPS: -", NULL, NULL);
+    initWindow(window);
     
-    // Enable V-Sync to limit to monitor refresh rate (usually 60 FPS)
-    glfwSwapInterval(0);  // 1 = enable V-Sync, 0 = disable
+    std::vector<float> circleVertices, positions, lastPositions, radiusColorData;
+    std::vector<float> velocity(NUMCIRCLES * 2, 0.0f), acceleration(NUMCIRCLES * 2, 0.0f);
 
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        std::cout << "Failed to initialize GLAD" << std::endl;
-        return -1;
-    }  
+    unsigned int VAO, positionVBO, vertexShader, fragmentShader, shaderProgram;
 
-    // sets the viewport to the size of the window
-    glViewport(0, 0, SRC_WIDTH, SRC_HEIGHT);
-
-    // resizes the viewport when the window is resized
-    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback); 
-
-    // Generate circle vertices
-    const int segments = 16;
-    std::vector<float> circleVertices;
-    
-    // Center vertex
-    circleVertices.push_back(0.0f);
-    circleVertices.push_back(0.0f);
-    circleVertices.push_back(0.0f);
-    
-    // Generate vertices around the circle
-    for (int i = 0; i <= segments; i++) {
-        float angle = 2.0f * M_PI * i / segments;
-        circleVertices.push_back(cos(angle));
-        circleVertices.push_back(sin(angle));
-        circleVertices.push_back(0.0f);
-    }
-
-    // Generate indices for triangle fan
+    positions.clear();
+    radiusColorData.clear();
     std::vector<unsigned int> indices;
-    for (int i = 1; i <= segments; i++) {
-        indices.push_back(0);      // center
-        indices.push_back(i);      // current vertex
-        indices.push_back(i + 1);  // next vertex
+    
+    // generating circle by composing them of smaller triangles
+    creatingCircles(circleVertices, indices);
+
+    // generate position of first circle and static data for instances
+    generatePositionsAndStaticData(lastPositions, positions, radiusColorData, acceleration);
+    
+    genAndBindBuffers(VAO, positionVBO, positions, radiusColorData, indices, circleVertices);
+
+    vertexShader = creatingVertexShader(vertexShader);
+
+    fragmentShader = creatingFragmentShader(fragmentShader);
+
+    shaderProgram = creatingShaderProgram(shaderProgram, fragmentShader, vertexShader);
+
+    // delete the shaders as they're linked into our program now and no longer necessary
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+
+    // Unbind VAO
+    glBindVertexArray(0);
+
+    
+    // // Pre-calculate constants for optimization
+    const float radiusSum = 2.0f * radius;
+    const float radiusSumSquared = radiusSum * radiusSum;
+    const float wallLeft = -1.0f + radius;
+    const float wallRight = 1.0f - radius;
+    const float wallBottom = -1.0f + radius;
+    const float wallTop = 1.0f - radius;
+
+    // spawning circles
+    int remainingCirclesToSpawn = NUMCIRCLES - 1;
+
+    // FPS check
+    int frames = 0;
+    bool reset = false;
+    
+    auto frameStartTime = std::chrono::steady_clock::now();
+    auto lastTime = frameStartTime;
+    std::chrono::duration<float> deltaTimeDuration;
+    auto timer = frameStartTime;
+    float actualDeltaTime = 0.0f;
+
+    // render loop
+    while (!glfwWindowShouldClose(window)) {
+        // Calculate delta time
+        frameStartTime = std::chrono::steady_clock::now();
+        deltaTimeDuration = frameStartTime - lastTime;
+        lastTime = frameStartTime;
+        actualDeltaTime = deltaTimeDuration.count();
+
+
+        // spawn a circle (if they are not over) every 0.25 seconds
+        auto timeFromLastSpawn = frameStartTime - timer;
+        if(remainingCirclesToSpawn > 0 && timeFromLastSpawn >= std::chrono::nanoseconds(250000000)){
+            generatePositionsAndStaticData(lastPositions, positions, radiusColorData, acceleration);
+            remainingCirclesToSpawn--;
+        }
+
+        // reset the timer for the frame counter
+        if(reset){
+            timer = lastTime;
+            reset = false;
+        }
+
+        
+        // wall collisions
+        for (int i = 0; i < NUMCIRCLES - remainingCirclesToSpawn; i++) {
+            
+            // Bounce off left and right walls (using pre-calculated constants)
+            if(positions[i * 2] <= wallLeft) {
+                positions[i * 2] = wallLeft;
+
+                velocity[i * 2] = -velocity[i * 2]; // Simply reverse X velocity
+            }
+            else if(positions[i * 2] >= wallRight) {
+                positions[i * 2] = wallRight;
+
+                velocity[i * 2] = -velocity[i * 2]; // Simply reverse X velocity
+            }
+            
+            // Bounce off top and bottom walls (using pre-calculated constants)
+            if(positions[i * 2 + 1] <= wallBottom) {
+                positions[i * 2 + 1] = wallBottom;
+
+                velocity[i * 2 + 1] = -velocity[i * 2 + 1]; // Simply reverse Y velocity
+            }
+            else if(positions[i * 2 + 1] >= wallTop) {
+                positions[i * 2 + 1] = wallTop;
+
+                velocity[i * 2 + 1] = -velocity[i * 2 + 1]; // Simply reverse Y velocity
+            }
+        }
+        
+       // Update positions based on Verlet integration
+        for (int i = 0; i < NUMCIRCLES - remainingCirclesToSpawn; i++){
+            // Store current position as next frame's lastPosition
+            float tempX = positions[i * 2];
+            float tempY = positions[i * 2 + 1];
+            
+            // Verlet integration: x(n+1) = 2*x(n) - x(n-1) + a*dt^2
+            positions[i * 2] = 2.0f * positions[i * 2] - lastPositions[i * 2] + acceleration[i * 2] * deltaTime * deltaTime;
+            positions[i * 2 + 1] = 2.0f * positions[i * 2 + 1] - lastPositions[i * 2 + 1] + acceleration[i * 2 + 1] * deltaTime * deltaTime;
+            
+            // Update lastPositions for next frame
+            lastPositions[i * 2] = tempX;
+            lastPositions[i * 2 + 1] = tempY;
+        }
+
+        glBindBuffer(GL_ARRAY_BUFFER, positionVBO);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, positions.size() * sizeof(float), positions.data());
+        
+        // clearing the screen
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // Use our shader program
+        glUseProgram(shaderProgram);
+        
+        // Bind the VAO and draw all instances
+        glBindVertexArray(VAO);
+        glDrawElementsInstanced(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0, NUMCIRCLES - remainingCirclesToSpawn);
+
+        // process input from keyboard
+        processInput(window);
+
+        
+        // frameTime = glfwGetTime() - frameStartTime;
+        // if (frameTime < TARGET_FRAME_TIME) {
+        //     float remainingTime = TARGET_FRAME_TIME - frameTime;
+        //     int sleepMicroseconds = (int)(remainingTime * 1000000.0f);
+        //     if (sleepMicroseconds > 0) {
+        //        usleep(sleepMicroseconds);
+        //     }
+        // }
+
+        frames++;
+        if(std::chrono::steady_clock::now() - timer > std::chrono::seconds(1)){
+            std::string title = "FPS: " + std::to_string(static_cast<int>(frames));
+            glfwSetWindowTitle(window, title.c_str());
+            reset = true;
+            frames = 0;
+        }
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
     }
-    // Close the circle
-    indices[indices.size() - 1] = 1;
 
+    glfwTerminate();
+    return 0;
+}
 
-    // Generate positions and static data for instances
-    std::vector<float> positions;
-    std::vector<float> radiusColorData;   
-    generatePositionsAndStaticData(positions, radiusColorData);
+void framebuffer_size_callback(GLFWwindow* window, int newWidth, int newHeight)
+{
+	glViewport(0, 0, newWidth, newHeight);
+	SRC_WIDTH = newWidth;
+	SRC_HEIGHT = newHeight;
+	//std::cout << "New resolution: " << SRC_WIDTH << "x" << SRC_HEIGHT << std::endl;
+}
 
+void processInput(GLFWwindow *window)
+{
+    if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+        glfwSetWindowShouldClose(window, true);
+}
 
-    // Create buffers
-    unsigned int VBO, VAO, EBO, positionVBO, radiusColorVBO;
+void generatePositionsAndStaticData(std::vector<float>& lastPositions, std::vector<float>& positions, std::vector<float>& radiusColorData, std::vector<float>& acceleration) {
+
+    positions.push_back(-0.9f); // X position
+    positions.push_back(0.9f); // Y position
+    lastPositions.push_back(-0.9f); // X position
+    lastPositions.push_back(0.9f);
+
+    acceleration.push_back(0.0f);   // 0 m/s^2 on X
+    acceleration.push_back(-9.81f);  // gravity on Y
+
+    radiusColorData.push_back(radius);
+    radiusColorData.push_back(1.0f);
+    radiusColorData.push_back(1.0f);
+    radiusColorData.push_back(1.0f);
+
+    float velocityX = 0.3f; // Initial velocity
+    float velocityY = -0.3f; // Initial velocity
+
+    // setting up velocity this way we use the formula (xn - x(n-1))/deltaT = v
+    int currentCircleIndex = (positions.size() / 2) - 1; // Get the index of the circle we just added
+    lastPositions[currentCircleIndex * 2] = positions[currentCircleIndex * 2] - velocityX * deltaTime;
+    lastPositions[currentCircleIndex * 2 + 1] = positions[currentCircleIndex * 2 + 1] - velocityY * deltaTime;
+}
+
+void genAndBindBuffers(unsigned int& VAO, unsigned int& positionVBO, std::vector<float>& positions, std::vector<float>& radiusColorData, std::vector<unsigned int>& indices, std::vector<float>& circleVertices){
+    unsigned int VBO,  EBO, radiusColorVBO;
+
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     glGenBuffers(1, &EBO);
@@ -156,9 +311,64 @@ int main(void) {
     glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(1 * sizeof(float)));
     glEnableVertexAttribArray(3);
     glVertexAttribDivisor(3, 1); // This makes it instanced
+}
 
-    // creating a vertex shader
-    unsigned int vertexShader;
+int initWindow(GLFWwindow *window){
+
+    if (!window) {
+        std::cout << "Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
+
+    glfwMakeContextCurrent(window);
+
+    
+    // Enable V-Sync to limit to monitor refresh rate (usually 60 FPS)
+    glfwSwapInterval(0);  // 1 = enable V-Sync, 0 = disable
+
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+        std::cout << "Failed to initialize GLAD" << std::endl;
+        return -1;
+    }  
+
+    // sets the viewport to the size of the window
+    glViewport(0, 0, SRC_WIDTH, SRC_HEIGHT);
+
+    // resizes the viewport when the window is resized
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback); 
+
+    glClearColor(0.1f, 0.1f, 0.1f, 1.0f); // RGBA values
+    return 0;
+}
+
+void creatingCircles(std::vector<float>& circleVertices, std::vector<unsigned int>& indices){
+    const int segments = 16;
+
+    // Center vertex
+    circleVertices.push_back(0.0f);
+    circleVertices.push_back(0.0f);
+    circleVertices.push_back(0.0f);
+    
+    // Generate vertices around the circle
+    for (int i = 0; i <= segments; i++) {
+        float angle = 2.0f * M_PI * i / segments;
+        circleVertices.push_back(cos(angle));
+        circleVertices.push_back(sin(angle));
+        circleVertices.push_back(0.0f);
+    }
+
+    for (int i = 1; i <= segments; i++) {
+        indices.push_back(0);      // center
+        indices.push_back(i);      // current vertex
+        indices.push_back(i + 1);  // next vertex
+    }
+    // Close the circle
+    indices[indices.size() - 1] = 1;
+
+}
+
+int creatingVertexShader(unsigned int vertexShader){
     vertexShader = glCreateShader(GL_VERTEX_SHADER);
     // attaching the source code to the vertex shader
     glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
@@ -172,110 +382,45 @@ int main(void) {
         glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
         std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog << std::endl;
     }
+    return vertexShader;
+}
 
-    // creating a fragment shader
-    unsigned int fragmentShader;
+int creatingFragmentShader(unsigned int fragmentShader){
     fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
     // attaching the source code to the fragment shader
     glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
     glCompileShader(fragmentShader);
 
+
     // check for shader compile errors
+    int success;
+    char infoLog[512];
     glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
     if (!success) {
         glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
         std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog << std::endl;
     }
+    return fragmentShader;
+}
 
-    // creating a shader program
-    unsigned int shaderProgram;
+int creatingShaderProgram(unsigned int shaderProgram, unsigned int fragmentShader, unsigned int vertexShader){
     shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, vertexShader);
     glAttachShader(shaderProgram, fragmentShader);
     glLinkProgram(shaderProgram);
 
-    // check for linking errors
+
+    int success;
+    char infoLog[512];
     glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
     if (!success) {
         glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
         std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED\n" << infoLog << std::endl;
     }
+    return shaderProgram;
+}
 
-    // delete the shaders as they're linked into our program now and no longer necessary
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
-
-    // Unbind VAO
-    glBindVertexArray(0);
-
-
-    std::vector<float> velocity(NUMCIRCLES * 2, 0.0f);
-    std::vector<float> mass(NUMCIRCLES, 1.0f);
-
-
-    // Frame rate limiting variables
-    const float TARGET_FPS = 60.0f;
-    const float TARGET_FRAME_TIME = 1.0f / TARGET_FPS;  // ~0.0167 seconds per frame
-    
-    float frameTime;
-    
-    float dx, dy;  // Changed from int to float for proper calculations
-    float distance;
-    
-    // Pre-declare variables used in loops for better performance
-    float distanceSquared, invDistance, nx, ny, overlap;
-    float separationX, separationY, relativeVelX, relativeVelY, velAlongNormal, impulse;
-    
-    // Pre-calculate constants for optimization
-    const float radiusSum = 2.0f * radius;
-    const float gravity = 9.81f;
-    const float radiusSumSquared = radiusSum * radiusSum;
-    const float wallLeft = -1.0f + radius;
-    const float wallRight = 1.0f - radius;
-    const float wallBottom = -1.0f + radius;
-    const float wallTop = 1.0f - radius;
-    
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    // Initialize with some random velocities and masses (reduced for slower movement)
-    std::uniform_real_distribution<float> velDist(-0.2f, 0.2f);  // Much smaller initial velocities
-    std::uniform_real_distribution<float> massDist(1.0f, 3.0f);
-    for (int i = 0; i < NUMCIRCLES; i++) {
-        velocity[i * 2] = velDist(gen);     // For random use velDist(gen) X velocity
-        velocity[i * 2 + 1] = velDist(gen); // Random Y velocity
-        mass[i] = 1.0f;            // Random mass between 1 and 3
-    }
-
-    //mass[3] = 100.0f;
-
-    // FPS check
-    int frames = 0;
-    bool reset = false;
-    
-   
-    auto frameStartTime = std::chrono::steady_clock::now();
-    auto lastTime = frameStartTime;
-    auto timer = frameStartTime;
-    float deltaTime = 0.0f;
-
-    int count = 0, sum = 0, low, peak, mean;
-
-    // render loop
-    while (!glfwWindowShouldClose(window)) {
-        frameStartTime = std::chrono::steady_clock::now();
-        std::chrono::duration<float> deltaTimeDuration;
-        deltaTimeDuration = frameStartTime - lastTime;
-        deltaTime = deltaTimeDuration.count();
-        lastTime = frameStartTime;
-
-        if(reset){
-            timer = lastTime;
-            std::cout << "reset avvenuto !!"  << std::endl;
-            reset = false;
-        }
-
-
-        // Circle-to-circle collision detection (optimized)
+/*        // Circle-to-circle collision detection (optimized)
         for (int i = 0; i < NUMCIRCLES; i++) {
             for(int j = i + 1; j < NUMCIRCLES; j++) { // Only check each pair once
                 dx = positions[i * 2] - positions[j * 2];
@@ -323,124 +468,4 @@ int main(void) {
                     velocity[j * 2 + 1] += impulse * ny;
                 }
             }
-        }
-        
-
-        for (int i = 0; i < NUMCIRCLES; i++) {
-            
-            // Update velocity with acceleration (increased damping for stability)
-            velocity[i * 2 + 1] -= gravity * deltaTime * 0.6f;
-
-            // Update positions based on velocity
-            positions[i * 2] += velocity[i * 2] * deltaTime;         // x position
-            positions[i * 2 + 1] += velocity[i * 2 + 1] * deltaTime; // y position
-            
-            // Bounce off left and right walls (using pre-calculated constants)
-            if(positions[i * 2] <= wallLeft) {
-                positions[i * 2] = wallLeft;
-                velocity[i * 2] = -velocity[i * 2]; // Simply reverse X velocity
-            }
-            else if(positions[i * 2] >= wallRight) {
-                positions[i * 2] = wallRight;
-                velocity[i * 2] = -velocity[i * 2]; // Simply reverse X velocity
-            }
-            
-            // Bounce off top and bottom walls (using pre-calculated constants)
-            if(positions[i * 2 + 1] <= wallBottom) {
-                positions[i * 2 + 1] = wallBottom;
-                velocity[i * 2 + 1] = -velocity[i * 2 + 1]; // Simply reverse Y velocity
-            }
-            else if(positions[i * 2 + 1] >= wallTop) {
-                positions[i * 2 + 1] = wallTop;
-                velocity[i * 2 + 1] = -velocity[i * 2 + 1]; // Simply reverse Y velocity
-            }
-        }
-        
-        glBindBuffer(GL_ARRAY_BUFFER, positionVBO);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, positions.size() * sizeof(float), positions.data());
-        
-        // clearing the screen
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        // Use our shader program
-        glUseProgram(shaderProgram);
-        
-        // Bind the VAO and draw all instances
-        glBindVertexArray(VAO);
-        glDrawElementsInstanced(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0, NUMCIRCLES);
-
-        // process input from keyboard
-        processInput(window);
-
-        // Frame rate limiting (using usleep for CPU efficiency)
-        //frameTime = glfwGetTime() - frameStartTime;
-        //if (frameTime < TARGET_FRAME_TIME) {
-            // Calculate remaining time in microseconds (usleep uses microseconds)
-            //float remainingTime = TARGET_FRAME_TIME - frameTime;
-            //int sleepMicroseconds = (int)(5 * 1000000.0f);
-            //if (sleepMicroseconds > 0) {
-            //    usleep(sleepMicroseconds);
-            //}
-        //}
-
-        glfwSwapBuffers(window);
-        glfwPollEvents();
-
-        frames++;
-        if(std::chrono::steady_clock::now() - timer > std::chrono::seconds(1)){
-            std::cout << "FPS: " << frames << std::endl;
-            if(count == 0)
-                low = frames;
-            if(frames > peak)
-                peak = frames;
-            if(frames < low)
-                low = frames;
-            sum += frames;
-            count++;
-            mean = sum / count;
-            reset = true;
-            frames = 0;
-        }
-
-
-    }
-
-    std::cout << "FPS peak: " << peak << ">> FPS low: " << low << ">> FPS mean: " << mean << std::endl;
-
-    glfwTerminate();
-    return 0;
-}
-
-void framebuffer_size_callback(GLFWwindow* window, int newWidth, int newHeight)
-{
-	glViewport(0, 0, newWidth, newHeight);
-	SRC_WIDTH = newWidth;
-	SRC_HEIGHT = newHeight;
-	//std::cout << "New resolution: " << SRC_WIDTH << "x" << SRC_HEIGHT << std::endl;
-}
-
-void processInput(GLFWwindow *window)
-{
-    if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-        glfwSetWindowShouldClose(window, true);
-}
-
-void generatePositionsAndStaticData(std::vector<float>& positions, std::vector<float>& radiusColorData) {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<float> posDist(-0.3f, 0.3f);  // Relative to group center
-    std::uniform_real_distribution<float> colorDist(0.0f, 1.0f);
-
-    positions.clear();
-    radiusColorData.clear();
-    for (int i = 0; i < NUMCIRCLES; i++) {
-        
-        positions.push_back(posDist(gen)); // X position
-        positions.push_back(posDist(gen)); // Y position
-
-        radiusColorData.push_back(radius);                // Radius
-        radiusColorData.push_back(colorDist(gen));       // R
-        radiusColorData.push_back(colorDist(gen));       // G
-        radiusColorData.push_back(colorDist(gen));       // B
-    }
-}
+        }*/
