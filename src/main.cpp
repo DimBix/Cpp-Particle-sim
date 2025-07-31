@@ -21,16 +21,16 @@ int creatingShaderProgram(unsigned int, unsigned int, unsigned int);
 
 int SRC_HEIGHT = 640;
 int SRC_WIDTH = 640;
-const int NUMCIRCLES = 100; // Number of circles to simulate
+const int NUMCIRCLES = 10; // Number of circles to simulate
 const float radius = 0.025f;
 
 // Circle spawning settings
-const float SPAWN_INTERVAL_MS = 50.0f;  // Spawn a circle every 500ms (0.5 seconds)
+const float SPAWN_INTERVAL_MS = 50.0f;
 
 // Frame rate limiting variables
 const float TARGET_FPS = 60.0f;
 const float UPDATER_PER_FRAME = 1.0f;
-const float deltaTime = (1.0f / TARGET_FPS) / UPDATER_PER_FRAME;  // Should be ~0.002083
+const float deltaTime = (1.0f / TARGET_FPS) / UPDATER_PER_FRAME; 
 
 
 
@@ -109,6 +109,7 @@ int main(void) {
     const float wallRight = 1.0f - radius;
     const float wallBottom = -1.0f + radius;
     const float wallTop = 1.0f - radius;
+    const float damping = 0.75f;
 
     // spawning circles
     int remainingCirclesToSpawn = NUMCIRCLES - 1;
@@ -121,7 +122,6 @@ int main(void) {
     auto lastTime = frameStartTime;
     std::chrono::duration<float> deltaTimeDuration;
     auto fpsTimer = frameStartTime;  // Separate timer for FPS counter
-    auto spawnTimer = frameStartTime; // Separate timer for circle spawning
     float actualDeltaTime = 0.0f;
 
     // render loop
@@ -134,17 +134,20 @@ int main(void) {
 
 
         // spawn a circle (if they are not over) every SPAWN_INTERVAL_MS milliseconds
-        auto timeFromLastSpawn = frameStartTime - spawnTimer;
-        auto spawnInterval = std::chrono::milliseconds(static_cast<int>(SPAWN_INTERVAL_MS));
-        if(remainingCirclesToSpawn > 0 && timeFromLastSpawn >= spawnInterval){
+        // Using fixed timestep for consistent spawning regardless of FPS
+        static int framesSinceLastSpawn = 0;
+        const int framesPerSpawn = static_cast<int>((SPAWN_INTERVAL_MS / 1000.0f) * TARGET_FPS); // Convert ms to frames
+        
+        if(remainingCirclesToSpawn > 0 && framesSinceLastSpawn >= framesPerSpawn){
             generatePositionsAndStaticData(lastPositions, positions, radiusColorData, acceleration);
             remainingCirclesToSpawn--;
-            spawnTimer = frameStartTime; // Reset spawn timer after spawning a circle
+            framesSinceLastSpawn = 0; // Reset frame counter
             
             // Update radius/color buffer with new data
             glBindBuffer(GL_ARRAY_BUFFER, radiusColorVBO);
             glBufferSubData(GL_ARRAY_BUFFER, 0, radiusColorData.size() * sizeof(float), radiusColorData.data());
         }
+        framesSinceLastSpawn++;
 
         // reset the timer for the frame counter
         if(reset){
@@ -167,30 +170,31 @@ int main(void) {
                 // Update lastPositions for next frame
                 lastPositions[i * 2] = tempX;
                 lastPositions[i * 2 + 1] = tempY;
+                
             }
             
             // Wall collisions (after position update)
             for (int i = 0; i < NUMCIRCLES - remainingCirclesToSpawn; i++) {
                 // Bounce off left and right walls
                 if(positions[i * 2] <= wallLeft) {
-                    positions[i * 2] = wallLeft;
                     // For Verlet integration, reverse velocity by reflecting lastPosition
-                    lastPositions[i * 2] = positions[i * 2] + (positions[i * 2] - lastPositions[i * 2]); // 0.8f for damping
+                    lastPositions[i * 2] = wallLeft + (positions[i * 2] - lastPositions[i * 2]) * damping;
+                    positions[i * 2] = wallLeft;
                 }
                 else if(positions[i * 2] >= wallRight) {
-                    positions[i * 2] = wallRight;
                     // Reverse velocity: subtract the velocity difference instead of adding
-                    lastPositions[i * 2] = positions[i * 2] + (positions[i * 2] - lastPositions[i * 2]);
+                    lastPositions[i * 2] = wallRight + (positions[i * 2] - lastPositions[i * 2]) * damping;
+                    positions[i * 2] = wallRight;
                 }
                 
                 // Bounce off top and bottom walls
                 if(positions[i * 2 + 1] <= wallBottom) {
+                    lastPositions[i * 2 + 1] = wallBottom + (positions[i * 2 + 1] - lastPositions[i * 2 + 1]) * damping;
                     positions[i * 2 + 1] = wallBottom;
-                    lastPositions[i * 2 + 1] = positions[i * 2 + 1] + (positions[i * 2 + 1] - lastPositions[i * 2 + 1]);
-                }
-                else if(positions[i * 2 + 1] >= wallTop) {
+                    
+                }else if(positions[i * 2 + 1] >= wallTop) {
+                    lastPositions[i * 2 + 1] = wallTop + (positions[i * 2 + 1] - lastPositions[i * 2 + 1]) * damping;
                     positions[i * 2 + 1] = wallTop;
-                    lastPositions[i * 2 + 1] = positions[i * 2 + 1] + (positions[i * 2 + 1] - lastPositions[i * 2 + 1]);
                 }
             }
 
