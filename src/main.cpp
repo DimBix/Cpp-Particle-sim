@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
-void processInput(GLFWwindow *window);
+void processInput(GLFWwindow *window, std::vector<float>& acceleration);
 void generatePositionsAndStaticData(std::vector<float>&, std::vector<float>&, std::vector<float>&, std::vector<float>& );
 void genAndBindBuffers(unsigned int&, unsigned int&, unsigned int&, std::vector<float>&, std::vector<float>&, std::vector<unsigned int>&, std::vector<float>&);
 int initWindow(GLFWwindow *window);
@@ -22,13 +22,15 @@ int creatingShaderProgram(unsigned int, unsigned int, unsigned int);
 int SRC_HEIGHT = 640;
 int SRC_WIDTH = 640;
 const int NUMCIRCLES = 1000; // Number of circles to simulate
-const float radius = 0.025f;
+const float radius = 0.012f;
 
 // Circle spawning settings
-const float SPAWN_INTERVAL_MS = 50.0f;
+const float SPAWN_INTERVAL_MS = 10.0f;
+const int segments = 32;
+const float precision = radius * radius * 0.1f; // Precision for distance calculations
 
 // Frame rate limiting variables
-const float TARGET_FPS = 60.0f;
+const float TARGET_FPS = 120.0f;
 const float UPDATER_PER_FRAME = 4.0f;
 const float deltaTime = (1.0f / TARGET_FPS) / UPDATER_PER_FRAME; 
 
@@ -119,7 +121,7 @@ int main(void) {
     float dx, dy, distanceSquared, distance, invDistance, nx, ny, overlap;
 
     // spawning circles
-    int remainingCirclesToSpawn = NUMCIRCLES - 1;
+    int remainingCirclesToSpawn = NUMCIRCLES - 5;
 
     // FPS check
     int frames = 1;
@@ -147,7 +149,7 @@ int main(void) {
         
         if(remainingCirclesToSpawn > 0 && framesSinceLastSpawn >= framesPerSpawn){
             generatePositionsAndStaticData(lastPositions, positions, radiusColorData, acceleration);
-            remainingCirclesToSpawn--;
+            remainingCirclesToSpawn -= 5;
             framesSinceLastSpawn = 0; // Reset frame counter
             
             // Update radius/color buffer with new data
@@ -212,7 +214,7 @@ int main(void) {
 
                     distanceSquared = dx * dx + dy * dy;
                     
-                    if(distanceSquared < radiusSumSquared && distanceSquared > 0.0001f) { // Avoid division by zero
+                    if(distanceSquared < radiusSumSquared && distanceSquared > precision) { // Avoid division by zero
                         distance = sqrt(distanceSquared);
                         overlap = radiusSum - distance;
 
@@ -240,7 +242,7 @@ int main(void) {
         glDrawElementsInstanced(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0, NUMCIRCLES - remainingCirclesToSpawn);
 
         // process input from keyboard
-        processInput(window);
+        processInput(window, acceleration);
 
         // Frame rate limiting to 60 FPS with fixed timestep
         auto frameEndTime = std::chrono::steady_clock::now();
@@ -280,33 +282,51 @@ void framebuffer_size_callback(GLFWwindow* window, int newWidth, int newHeight)
 	//std::cout << "New resolution: " << SRC_WIDTH << "x" << SRC_HEIGHT << std::endl;
 }
 
-void processInput(GLFWwindow *window)
-{
+void processInput(GLFWwindow *window, std::vector<float>& acceleration){
     if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
+
+    if(glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+        for(int i = 0; i < NUMCIRCLES; i++) {
+            acceleration[i * 2 + 1] = -acceleration[i * 2 + 1]; // Reverse Y acceleration
+        }
+    }
+
+    if(glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+        for(int i = 0; i < NUMCIRCLES; i++) {
+            acceleration[i * 2] = -5.0f; // Reverse X acceleration
+        }
+    }
 }
 
 void generatePositionsAndStaticData(std::vector<float>& lastPositions, std::vector<float>& positions, std::vector<float>& radiusColorData, std::vector<float>& acceleration) {
 
-    positions.push_back(0.0f); // X position
-    positions.push_back(0.5f); // Y position
-    lastPositions.push_back(0.0f); // X position
-    lastPositions.push_back(0.5f);
+    // Randomly generate a position for the new circle
+    static std::random_device rd;  // Obtain a random number from hardware
+    static std::mt19937 eng(rd()); // Seed the generator
+    static std::uniform_real_distribution<float> color(-1.0f, 1.0f); // Random color distribution
 
-    acceleration.push_back(0.0f);     // 0 m/s^2 on X
-    acceleration.push_back(-3.0f);    // gravity on Y (increased for visibility)
+    for(int i = 0; i < 5; i++) {
+       
+        positions.push_back(-0.95f); // X position
+        positions.push_back(0.95f - i * 0.05f); // Y position
+        lastPositions.push_back(-0.95f); // X position
+        lastPositions.push_back(0.95f - i * 0.05f); // Y position
 
-    radiusColorData.push_back(radius);
-    radiusColorData.push_back(1.0f);
-    radiusColorData.push_back(1.0f);
-    radiusColorData.push_back(1.0f);
+        acceleration.push_back(0.0f);     // 0 m/s^2 on X
+        acceleration.push_back(-3.0f);    // gravity on Y (increased for visibility)
 
-    // setting up velocity this way we use the formula (xn - x(n-1))/deltaT = v
-    // static method
-    int currentCircleIndex = (positions.size() / 2) - 1; // Get the index of the circle we just added
-    lastPositions[currentCircleIndex * 2] = positions[currentCircleIndex * 2] - velocityX * deltaTime;
-    lastPositions[currentCircleIndex * 2 + 1] = positions[currentCircleIndex * 2 + 1] + velocityY * deltaTime;
+        radiusColorData.push_back(radius);
+        radiusColorData.push_back(1.0f); // Random color R
+        radiusColorData.push_back(1.0f); // Random color R
+        radiusColorData.push_back(1.0f);
 
+        // setting up velocity this way we use the formula (xn - x(n-1))/deltaT = v
+        // static method
+        int currentCircleIndex = (positions.size() / 2) - 1; // Get the index of the circle we just added
+        lastPositions[currentCircleIndex * 2] = positions[currentCircleIndex * 2] - velocityX * deltaTime;
+        lastPositions[currentCircleIndex * 2 + 1] = positions[currentCircleIndex * 2 + 1] + velocityY * deltaTime;
+    }
 }
 
 void genAndBindBuffers(unsigned int& VAO, unsigned int& positionVBO, unsigned int& radiusColorVBO, std::vector<float>& positions, std::vector<float>& radiusColorData, std::vector<unsigned int>& indices, std::vector<float>& circleVertices){
@@ -390,7 +410,7 @@ int initWindow(GLFWwindow *window){
 }
 
 void creatingCircles(std::vector<float>& circleVertices, std::vector<unsigned int>& indices){
-    const int segments = 16;
+
 
     // Center vertex
     circleVertices.push_back(0.0f);
@@ -466,53 +486,3 @@ int creatingShaderProgram(unsigned int shaderProgram, unsigned int fragmentShade
     }
     return shaderProgram;
 }
-
-/*        // Circle-to-circle collision detection (optimized)
-        for (int i = 0; i < NUMCIRCLES; i++) {
-            for(int j = i + 1; j < NUMCIRCLES; j++) { // Only check each pair once
-                dx = positions[i * 2] - positions[j * 2];
-                dy = positions[i * 2 + 1] - positions[j * 2 + 1];
-                
-                // Quick distance check using squared distance (avoid sqrt)
-                distanceSquared = dx * dx + dy * dy;
-                
-                // Check if circles are colliding using squared distance
-                if(distanceSquared < radiusSumSquared && distanceSquared > 0.0001f) { // Avoid division by zero
-                    // Only calculate sqrt when we know there's a collision
-                    distance = sqrt(distanceSquared);
-                    
-                    // Normalize the collision vector
-                    invDistance = 1.0f / distance;  // Cache inverse
-                    nx = dx * invDistance;  // Normal X component
-                    ny = dy * invDistance;  // Normal Y component
-                    
-                    // Separate the circles to prevent overlap
-                    overlap = radiusSum - distance;
-                    separationX = nx * overlap * 0.5f;
-                    separationY = ny * overlap * 0.5f;
-                    
-                    positions[i * 2] += separationX;
-                    positions[i * 2 + 1] += separationY;
-                    positions[j * 2] -= separationX;
-                    positions[j * 2 + 1] -= separationY;
-                    
-                    // Calculate relative velocity
-                    relativeVelX = velocity[i * 2] - velocity[j * 2];
-                    relativeVelY = velocity[i * 2 + 1] - velocity[j * 2 + 1];
-                    
-                    // Calculate relative velocity in collision normal direction
-                    velAlongNormal = relativeVelX * nx + relativeVelY * ny;
-                    
-                    // Do not resolve if velocities are separating
-                    if(velAlongNormal > 0) continue;
-                    
-                    // Apply elastic collision response (equal mass assumption)
-                    impulse = 2.0f * velAlongNormal / (mass[i] + mass[j]);
-                    
-                    velocity[i * 2] -= impulse * nx;
-                    velocity[i * 2 + 1] -= impulse * ny;
-                    velocity[j * 2] += impulse * nx;
-                    velocity[j * 2 + 1] += impulse * ny;
-                }
-            }
-        }*/
