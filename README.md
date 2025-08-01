@@ -6,11 +6,11 @@ I will now explain the math behind all the calculations in this simulation.<br>T
 $$
   \mathbf{x}(t + \Delta t) = 2 \mathbf{x}(t) - \mathbf{x}(t - \Delta t) + \mathbf{a}(t) \Delta t^2
 $$
-<br>In this represantion of the law of motion, velocity does not appear explicitly in the formula, therefore we have to express it throught 
+<br>In this represantion of the law of motion, velocity does not appear explicitly in the formula, therefore we have to express it throught<br>
 $$
 \frac{\mathbf{x}(t) - \mathbf{x}(t - \Delta t)}{t}
 $$
-<br>Thanks to this two formulas it is possible to calculate the next position of the particle and with this achivment we conclude the first part of the simulation.<br><br>
+<br>Thanks to this two formulas it is possible to calculate the next position of the particle and with this achivment we conclude the first part of the simulation.<br>
 Collisions between walls and other particles are next. We assume that every particle as the same radius and mass of others, 
 
   
