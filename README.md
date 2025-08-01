@@ -6,8 +6,8 @@ In this project, I aim to simulate interactions between a large number of partic
 
 I will now explain the math behind all the calculations in this simulation. The law of motion for every particle can be described by Verlet Integration:
 
-$
-\mathbf{x}(t + \Delta t) = 2 \mathbf{x}(t) - \mathbf{x}(t - \Delta t) + \mathbf{a}(t) \Delta t^2 $
+$$
+\mathbf{x}(t + \Delta t) = 2 \mathbf{x}(t) - \mathbf{x}(t - \Delta t) + \mathbf{a}(t) \Delta t^2 $$
 
 In this representation of the law of motion, velocity does not appear explicitly in the formula; therefore, we have to express it through:
 
