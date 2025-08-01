@@ -16,6 +16,8 @@ $$
 
 Thanks to these two formulas, it is possible to calculate the next position of the particle. With this achievement, we conclude the first part of the simulation. Next, we will handle collisions between walls and other particles. We assume that every particle has the same radius and mass as the others.
 
+
+
 # How to use:
 In order to run this project you will need to:
 1. Install `Git`, `make`, `g++` on your computer
@@ -30,3 +32,6 @@ In order to run this project you will need to:
 7. move to the bin directory
 8. Execute the file
 
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
