@@ -1,26 +1,31 @@
-# Particle simulation
-In this project I aim to simulate interactions between a large number of particles using opengl library to render the scene. As you can see by the commits history the main goal of the project has shifted from the original of simulating gravity, it was infact necessary to ensure the interactions between particles where correct and optimized before moving to the next step.
+# Particle Simulation
 
-# MATH
-I will now explain the math behind all the calculations in this simulation.<br>The law of motion behind every particle can be described by Verlet Integration: <br>
-$$
-  \mathbf{x}(t + \Delta t) = 2 \mathbf{x}(t) - \mathbf{x}(t - \Delta t) + \mathbf{a}(t) \Delta t^2
-$$
-<br>In this represantion of the law of motion, velocity does not appear explicitly in the formula, therefore we have to express it throught<br>
-$$
-\frac{\mathbf{x}(t) - \mathbf{x}(t - \Delta t)}{t}
-$$
-<br>Thanks to this two formulas it is possible to calculate the next position of the particle and with this achivment we conclude the first part of the simulation.<br>
-Collisions between walls and other particles are next. We assume that every particle as the same radius and mass of others, 
+In this project, I aim to simulate interactions between a large number of particles using the OpenGL library to render the scene. As you can see from the commit history, the main goal of the project has shifted from the original aim of simulating gravity. It was, in fact, necessary to ensure that the interactions between particles were correct and optimized before moving to the next step.
 
-  
-# To Run the project you will need:
+# Math
+
+I will now explain the math behind all the calculations in this simulation. The law of motion for every particle can be described by Verlet Integration:
+
+$
+\mathbf{x}(t + \Delta t) = 2 \mathbf{x}(t) - \mathbf{x}(t - \Delta t) + \mathbf{a}(t) \Delta t^2
+$
+
+In this representation of the law of motion, velocity does not appear explicitly in the formula; therefore, we have to express it through:
+
+$
+\frac{\mathbf{x}(t) - \mathbf{x}(t - \Delta t)}{\Delta t}
+$
+
+Thanks to these two formulas, it is possible to calculate the next position of the particle. With this achievement, we conclude the first part of the simulation. Next, we will handle collisions between walls and other particles. We assume that every particle has the same radius and mass as the others.
+
+# To Run the Project, You Will Need:
+
 - g++ compiler
-- library glfw3 installed (for windows it is already included)
-- make
+- GLFW3 library installed (for Windows, it is already included)
+- Make
 
-# Once ensured everything is met, run:
-- make
-- cd bin
-- Execute the file
+# Once Everything is Set Up, Run:
 
+1. `make`
+2. `cd bin`
+3. Execute the file
