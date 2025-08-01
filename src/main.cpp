@@ -219,10 +219,10 @@ int main(void) {
                         overlap = radiusSum - distance;
 
                         
-                        positions[i * 2] += (dx / distance) * (overlap) * 0.5f;
-                        positions[i * 2 + 1] += (dy / distance) * (overlap) * 0.5f;
-                        positions[j * 2] -= (dx / distance) * (overlap) * 0.5f;
-                        positions[j * 2 + 1] -= (dy / distance) * (overlap) * 0.5f;
+                        positions[i * 2] += (dx / distance) * (overlap) * 0.25f;
+                        positions[i * 2 + 1] += (dy / distance) * (overlap) * 0.25f;
+                        positions[j * 2] -= (dx / distance) * (overlap) * 0.25f;
+                        positions[j * 2 + 1] -= (dy / distance) * (overlap) * 0.25f;
                     }
                 }
             }
