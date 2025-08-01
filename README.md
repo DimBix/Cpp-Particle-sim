@@ -7,6 +7,10 @@ I will now explain the math behind all the calculations in this simulation.The l
 $$\[
   \mathbf{x}(t + \Delta t) = 2 \mathbf{x}(t) - \mathbf{x}(t - \Delta t) + \mathbf{a}(t) \Delta t^2
   \]$$
+In this represantion of the law of motion, velocity does not appear explicitly in the formula, therefore we have to express it throught \[
+\frac{\mathbf{x}(t) - \mathbf{x}(t - \Delta t)}{t}
+\]
+
 
   
 # To Run the project you will need:
