@@ -20,7 +20,13 @@ set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(EXE particle_sim)
 set(INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/Dependencies/include)
 
-add_executable(${EXE} ${SOURCE_DIR}/main.cpp ${SOURCE_DIR}/glad.c)
+# Automatically find all source files
+file(GLOB SOURCES 
+    "${SOURCE_DIR}/*.cpp"
+    "${SOURCE_DIR}/*.c"
+)
+
+add_executable(${EXE} ${SOURCES})
 
 if(WIN32)
     target_link_libraries(${EXE} glfw3 opengl32)
