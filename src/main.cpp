@@ -1,6 +1,7 @@
 #include "glad/glad.h"
 #include "GLFW/glfw3.h"
 #include "SpatialGrid.h"
+#include "PerformanceProfiler.h"
 #include <stdio.h>
 #include <vector>
 #include <iostream>
@@ -20,27 +21,27 @@ int creatingVertexShader(unsigned int);
 int creatingFragmentShader(unsigned int);
 int creatingShaderProgram(unsigned int, unsigned int, unsigned int);
 
+
+
 int SRC_HEIGHT = 720;
 int SRC_WIDTH = 720;
-const int NUMCIRCLES = 5500; // Number of circles to simulate
-const float radius = 0.015f;
+const int NUMCIRCLES = 3800; // Number of circles to simulate
+const float radius = 0.008f;
 
 // Circle spawning settings
 const float SPAWN_INTERVAL_MS = 10.0f;
-const int NUMBER_OF_CIRCLES_SPAWNED = 5;
+const int NUMBER_OF_CIRCLES_SPAWNED = 10;
 const int segments = 32;
 const float precision = radius * radius * 0.1f; // Precision for distance calculations
 
 // Frame rate limiting variables
 const float TARGET_FPS = 60.0f;
-const float UPDATER_PER_FRAME = 5.0f;
+const float UPDATER_PER_FRAME = 8.0f;
 const float deltaTime = (1.0f / TARGET_FPS) / UPDATER_PER_FRAME; 
 
 //spawning velocity
-const float velocityX = 5.1f; // X velocity for spawning circles
-const float velocityY = 2.4f; // Y velocity for spawning circles
-float angle = atan2(velocityY, -velocityX);
-bool reducing = true; // Flag to control angle reduction
+const float velocityX = 3.1f; // X velocity for spawning circles
+const float velocityY = 1.0f; // Y velocity for spawning circles
 
 const char *vertexShaderSource = "#version 330 core\n"
     "layout (location = 0) in vec3 aPos;\n"
@@ -142,6 +143,10 @@ int main(void) {
     int activeParticles;
     std::vector<int> nearby;
 
+    g_profiler.collisionCheck = 0;
+    g_profiler.collisionVerified = 0;
+
+
     // render loop
     while (!glfwWindowShouldClose(window)) {
         // Calculate delta time
@@ -175,94 +180,110 @@ int main(void) {
 
         for (int physicsStep = 0; physicsStep < UPDATER_PER_FRAME; physicsStep++) {
             // Update positions based on Verlet integration
-            for (int i = 0; i < NUMCIRCLES - remainingCirclesToSpawn; i++){
-                // Store current position as next frame's lastPosition
-                float tempX = positions[i * 2];
-                float tempY = positions[i * 2 + 1];
-                
-                // Verlet integration: x(n+1) = 2*x(n) - x(n-1) + a*dt^2
-                positions[i * 2] = 2.0f * positions[i * 2] - lastPositions[i * 2] + acceleration[i * 2] * deltaTime * deltaTime;
-                positions[i * 2 + 1] = 2.0f * positions[i * 2 + 1] - lastPositions[i * 2 + 1] + acceleration[i * 2 + 1] * deltaTime * deltaTime;
-                
-                // Update lastPositions for next frame
-                lastPositions[i * 2] = tempX;
-                lastPositions[i * 2 + 1] = tempY;
-                
+            {
+                PROFILE_SCOPE(g_profiler, "Verlet Integration");
+                for (int i = 0; i < NUMCIRCLES - remainingCirclesToSpawn; i++){
+                    // Store current position as next frame's lastPosition
+                    float tempX = positions[i * 2];
+                    float tempY = positions[i * 2 + 1];
+                    
+                    // Verlet integration: x(n+1) = 2*x(n) - x(n-1) + a*dt^2
+                    positions[i * 2] = 2.0f * positions[i * 2] - lastPositions[i * 2] + acceleration[i * 2] * deltaTime * deltaTime;
+                    positions[i * 2 + 1] = 2.0f * positions[i * 2 + 1] - lastPositions[i * 2 + 1] + acceleration[i * 2 + 1] * deltaTime * deltaTime;
+                    
+                    // Update lastPositions for next frame
+                    lastPositions[i * 2] = tempX;
+                    lastPositions[i * 2 + 1] = tempY;
+                    
+                }
             }
             
             // Wall collisions (after position update)
-            for (int i = 0; i < NUMCIRCLES - remainingCirclesToSpawn; i++) {
-                // Bounce off left and right walls
-                if(positions[i * 2] <= wallLeft) {
-                    // For Verlet integration, reverse velocity by reflecting lastPosition
-                    lastPositions[i * 2] = wallLeft + (positions[i * 2] - lastPositions[i * 2]) * damping;
-                    positions[i * 2] = wallLeft;
-                }
-                else if(positions[i * 2] >= wallRight) {
-                    // Reverse velocity: subtract the velocity difference instead of adding
-                    lastPositions[i * 2] = wallRight + (positions[i * 2] - lastPositions[i * 2]) * damping;
-                    positions[i * 2] = wallRight;
-                }
-                
-                // Bounce off top and bottom walls
-                if(positions[i * 2 + 1] <= wallBottom) {
-                    lastPositions[i * 2 + 1] = wallBottom + (positions[i * 2 + 1] - lastPositions[i * 2 + 1]) * damping;
-                    positions[i * 2 + 1] = wallBottom;
+            {
+                PROFILE_SCOPE(g_profiler, "Wall Collisions");
+                for (int i = 0; i < NUMCIRCLES - remainingCirclesToSpawn; i++) {
+                    // Bounce off left and right walls
+                    if(positions[i * 2] <= wallLeft) {
+                        // For Verlet integration, reverse velocity by reflecting lastPosition
+                        lastPositions[i * 2] = wallLeft + (positions[i * 2] - lastPositions[i * 2]) * damping;
+                        positions[i * 2] = wallLeft;
+                    }
+                    else if(positions[i * 2] >= wallRight) {
+                        // Reverse velocity: subtract the velocity difference instead of adding
+                        lastPositions[i * 2] = wallRight + (positions[i * 2] - lastPositions[i * 2]) * damping;
+                        positions[i * 2] = wallRight;
+                    }
                     
-                }else if(positions[i * 2 + 1] >= wallTop) {
-                    lastPositions[i * 2 + 1] = wallTop + (positions[i * 2 + 1] - lastPositions[i * 2 + 1]) * damping;
-                    positions[i * 2 + 1] = wallTop;
+                    // Bounce off top and bottom walls
+                    if(positions[i * 2 + 1] <= wallBottom) {
+                        lastPositions[i * 2 + 1] = wallBottom + (positions[i * 2 + 1] - lastPositions[i * 2 + 1]) * damping;
+                        positions[i * 2 + 1] = wallBottom;
+                        
+                    }else if(positions[i * 2 + 1] >= wallTop) {
+                        lastPositions[i * 2 + 1] = wallTop + (positions[i * 2 + 1] - lastPositions[i * 2 + 1]) * damping;
+                        positions[i * 2 + 1] = wallTop;
+                    }
                 }
             }
 
             //Collision between objects using spatial grid optimization
-            activeParticles = NUMCIRCLES - remainingCirclesToSpawn;
-            
-            // Clear and populate spatial grid
-            spatialGrid.clear();
-            for (int i = 0; i < activeParticles; i++) {
-                spatialGrid.addParticle(i, positions[i * 2], positions[i * 2 + 1]);
-            }
-            
-            for (int i = 0; i < activeParticles; i++) {
-                x = positions[i * 2];
-                y = positions[i * 2 + 1];
+            {
+                PROFILE_SCOPE(g_profiler, "Particle Collisions");
+                activeParticles = NUMCIRCLES - remainingCirclesToSpawn;
                 
-                nearby = spatialGrid.getNearbyParticles(x, y, radius * 2.0f);
+                // Clear and populate spatial grid
+                spatialGrid.clear();
+                for (int i = 0; i < activeParticles; i++) {
+                    spatialGrid.addParticle(i, positions[i * 2], positions[i * 2 + 1]);
+                }
                 
-                for (int j : nearby) {
-                    if (i >= j) continue; // Avoid duplicate checks and self-collision
+                for (int i = 0; i < activeParticles; i++) {
+                    x = positions[i * 2];
+                    y = positions[i * 2 + 1];
                     
-                    dx = x - positions[j * 2];
-                    dy = y - positions[j * 2 + 1];
-                    distanceSquared = dx * dx + dy * dy;
+                    nearby = spatialGrid.getNearbyParticles(x, y, radius * 2.0f);
                     
-                    if (distanceSquared < radiusSumSquared && distanceSquared > precision) {
-                        distance = sqrtf(distanceSquared); 
-                        overlap = radiusSum - distance;
-                        separation = overlap * 0.25f / distance;
+                    for (int j : nearby) {
+                        if (i >= j) continue; // Avoid duplicate checks and self-collision
+                        g_profiler.collisionCheck++;
+
+                        dx = x - positions[j * 2];
+                        dy = y - positions[j * 2 + 1];
+                        distanceSquared = dx * dx + dy * dy;
                         
-                        positions[i * 2] += dx * separation;
-                        positions[i * 2 + 1] += dy * separation;
-                        positions[j * 2] -= dx * separation;
-                        positions[j * 2 + 1] -= dy * separation;
+                        if (distanceSquared < radiusSumSquared && distanceSquared > precision) {
+                            g_profiler.collisionVerified++;
+
+                            distance = sqrtf(distanceSquared); 
+                            overlap = radiusSum - distance;
+                            separation = overlap * 0.25f / distance;
+                            
+                            positions[i * 2] += dx * separation;
+                            positions[i * 2 + 1] += dy * separation;
+                            positions[j * 2] -= dx * separation;
+                            positions[j * 2 + 1] -= dy * separation;
+                        }
                     }
                 }
             }
         }
 
-        glBindBuffer(GL_ARRAY_BUFFER, positionVBO);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, positions.size() * sizeof(float), positions.data());
-        
-        // clearing the screen
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        // GPU buffer update and rendering
+        {
+            PROFILE_SCOPE(g_profiler, "Rendering");
+            glBindBuffer(GL_ARRAY_BUFFER, positionVBO);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, positions.size() * sizeof(float), positions.data());
+            
+            // clearing the screen
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Use our shader program
-        glUseProgram(shaderProgram);
-        
-        // Bind the VAO and draw all instances
-        glBindVertexArray(VAO);
-        glDrawElementsInstanced(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0, NUMCIRCLES - remainingCirclesToSpawn);
+            // Use our shader program
+            glUseProgram(shaderProgram);
+            
+            // Bind the VAO and draw all instances
+            glBindVertexArray(VAO);
+            glDrawElementsInstanced(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0, NUMCIRCLES - remainingCirclesToSpawn);
+        }
 
         // process input from keyboard
         processInput(window, acceleration);
@@ -282,8 +303,18 @@ int main(void) {
 
         frames++;
         if(std::chrono::steady_clock::now() - fpsTimer > std::chrono::seconds(1)){
-            std::string title = "FPS: " + std::to_string(static_cast<int>(frames));
+            std::string title = "FPS: " + std::to_string(static_cast<int>(frames)) + " Particles: " + std::to_string(NUMCIRCLES - remainingCirclesToSpawn);
             glfwSetWindowTitle(window, title.c_str());
+
+            // Print detailed performance stats every 5 seconds
+            static int statsCounter = 0;
+            statsCounter++;
+            if (statsCounter >= 5) {
+                g_profiler.printStats();
+                g_profiler.printMemoryUsage();
+                g_profiler.printCollisionStats();
+                statsCounter = 0;
+            }
 
             reset = true;
             frames = 1;

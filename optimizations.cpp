@@ -5,6 +5,9 @@
 
 #include "SpatialGrid.h"
 
+// Add this after your existing variables in main():
+// Optimal cell size should be about 2x particle radius
+
 // 2. FAST SQUARE ROOT OPTIMIZATION
 // Replace sqrt() with fast approximation for collision detection:
 inline float fastSqrt(float x) {
