@@ -21,17 +21,10 @@ Thanks to these two formulas, it is possible to calculate the next position of t
 # How to use:
 In order to run this project you will need to:
 1. Install `Git`, `make`, `g++` on your computer
-2. If you are using Linux be sure to download this dependecies:
-```
-    sudo apt-get update
-    sudo apt-get install libglfw3-dev libglew-dev libglm-dev
-```
-4. Follow the instructions on how to clone or fork a repository (on your computer)
-5. Once downloaded your fork or cloned the repo, enter it: `cd Cpp-particle-sim`
-6. run the command: `make`
-7. move to the bin directory
-8. Execute the file
-
+2. Follow the instructions on how to clone or fork a repository (on your computer)
+3. Once downloaded your fork or cloned the repo, enter it: `cd Cpp-particle-sim`
+4. Follow the instructions contained in README_BUILD.md
+   
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE.md) file for details.
