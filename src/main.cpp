@@ -1,4 +1,4 @@
-#include <glad/glad.h>
+#include "glad/glad.h"
 #include <GLFW/glfw3.h>
 #include <stdio.h>
 #include <vector>
@@ -22,7 +22,7 @@ int creatingShaderProgram(unsigned int, unsigned int, unsigned int);
 int SRC_HEIGHT = 640;
 int SRC_WIDTH = 640;
 const int NUMCIRCLES = 1000; // Number of circles to simulate
-const float radius = 0.012f;
+const float radius = 0.015f;
 
 // Circle spawning settings
 const float SPAWN_INTERVAL_MS = 10.0f;
