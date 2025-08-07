@@ -1,5 +1,6 @@
 #include "glad/glad.h"
-#include <GLFW/glfw3.h>
+#include "GLFW/glfw3.h"
+#include "SpatialGrid.h"
 #include <stdio.h>
 #include <vector>
 #include <iostream>
@@ -19,19 +20,20 @@ int creatingVertexShader(unsigned int);
 int creatingFragmentShader(unsigned int);
 int creatingShaderProgram(unsigned int, unsigned int, unsigned int);
 
-int SRC_HEIGHT = 640;
-int SRC_WIDTH = 640;
-const int NUMCIRCLES = 1000; // Number of circles to simulate
+int SRC_HEIGHT = 720;
+int SRC_WIDTH = 720;
+const int NUMCIRCLES = 5500; // Number of circles to simulate
 const float radius = 0.015f;
 
 // Circle spawning settings
 const float SPAWN_INTERVAL_MS = 10.0f;
+const int NUMBER_OF_CIRCLES_SPAWNED = 5;
 const int segments = 32;
 const float precision = radius * radius * 0.1f; // Precision for distance calculations
 
 // Frame rate limiting variables
-const float TARGET_FPS = 120.0f;
-const float UPDATER_PER_FRAME = 4.0f;
+const float TARGET_FPS = 60.0f;
+const float UPDATER_PER_FRAME = 5.0f;
 const float deltaTime = (1.0f / TARGET_FPS) / UPDATER_PER_FRAME; 
 
 //spawning velocity
@@ -115,13 +117,16 @@ int main(void) {
     const float wallRight = 1.0f - radius;
     const float wallBottom = -1.0f + radius;
     const float wallTop = 1.0f - radius;
-    const float damping = 0.75f;
+    const float damping = 0.55f;
 
     // distance calculation variables
     float dx, dy, distanceSquared, distance, invDistance, nx, ny, overlap;
 
     // spawning circles
-    int remainingCirclesToSpawn = NUMCIRCLES - 5;
+    int remainingCirclesToSpawn = NUMCIRCLES - NUMBER_OF_CIRCLES_SPAWNED;
+
+    const float GRID_CELL_SIZE = radius * 2.2f; // Optimal cell size
+    SpatialGrid spatialGrid(GRID_CELL_SIZE, -1.0f, -1.0f, 1.0f, 1.0f);
 
     // FPS check
     int frames = 1;
@@ -132,6 +137,10 @@ int main(void) {
     std::chrono::duration<float> deltaTimeDuration;
     auto fpsTimer = frameStartTime;  // Separate timer for FPS counter
     float actualDeltaTime = 0.0f;
+
+    float separation, x, y;
+    int activeParticles;
+    std::vector<int> nearby;
 
     // render loop
     while (!glfwWindowShouldClose(window)) {
@@ -149,7 +158,7 @@ int main(void) {
         
         if(remainingCirclesToSpawn > 0 && framesSinceLastSpawn >= framesPerSpawn){
             generatePositionsAndStaticData(lastPositions, positions, radiusColorData, acceleration);
-            remainingCirclesToSpawn -= 5;
+            remainingCirclesToSpawn -= NUMBER_OF_CIRCLES_SPAWNED;
             framesSinceLastSpawn = 0; // Reset frame counter
             
             // Update radius/color buffer with new data
@@ -206,23 +215,37 @@ int main(void) {
                 }
             }
 
-            //Collision between objects
-            for(int i = 0; i < NUMCIRCLES -  remainingCirclesToSpawn; i++){
-                for(int j = 0; j < NUMCIRCLES -  remainingCirclesToSpawn; j++){
-                    dx = positions[i * 2] - positions[j * 2];
-                    dy = positions[i * 2 + 1] - positions[j * 2 + 1];
-
+            //Collision between objects using spatial grid optimization
+            activeParticles = NUMCIRCLES - remainingCirclesToSpawn;
+            
+            // Clear and populate spatial grid
+            spatialGrid.clear();
+            for (int i = 0; i < activeParticles; i++) {
+                spatialGrid.addParticle(i, positions[i * 2], positions[i * 2 + 1]);
+            }
+            
+            for (int i = 0; i < activeParticles; i++) {
+                x = positions[i * 2];
+                y = positions[i * 2 + 1];
+                
+                nearby = spatialGrid.getNearbyParticles(x, y, radius * 2.0f);
+                
+                for (int j : nearby) {
+                    if (i >= j) continue; // Avoid duplicate checks and self-collision
+                    
+                    dx = x - positions[j * 2];
+                    dy = y - positions[j * 2 + 1];
                     distanceSquared = dx * dx + dy * dy;
                     
-                    if(distanceSquared < radiusSumSquared && distanceSquared > precision) { // Avoid division by zero
-                        distance = sqrt(distanceSquared);
+                    if (distanceSquared < radiusSumSquared && distanceSquared > precision) {
+                        distance = sqrtf(distanceSquared); 
                         overlap = radiusSum - distance;
-
+                        separation = overlap * 0.25f / distance;
                         
-                        positions[i * 2] += (dx / distance) * (overlap) * 0.25f;
-                        positions[i * 2 + 1] += (dy / distance) * (overlap) * 0.25f;
-                        positions[j * 2] -= (dx / distance) * (overlap) * 0.25f;
-                        positions[j * 2 + 1] -= (dy / distance) * (overlap) * 0.25f;
+                        positions[i * 2] += dx * separation;
+                        positions[i * 2 + 1] += dy * separation;
+                        positions[j * 2] -= dx * separation;
+                        positions[j * 2 + 1] -= dy * separation;
                     }
                 }
             }
@@ -278,8 +301,8 @@ void framebuffer_size_callback(GLFWwindow* window, int newWidth, int newHeight)
 {
 	glViewport(0, 0, newWidth, newHeight);
 	SRC_WIDTH = newWidth;
-	SRC_HEIGHT = newHeight;
-	//std::cout << "New resolution: " << SRC_WIDTH << "x" << SRC_HEIGHT << std::endl;
+	SRC_HEIGHT = newHeight;    
+    //std::cout << "New resolution: " << SRC_WIDTH << "x" << SRC_HEIGHT << std::endl;
 }
 
 void processInput(GLFWwindow *window, std::vector<float>& acceleration){
@@ -306,15 +329,15 @@ void generatePositionsAndStaticData(std::vector<float>& lastPositions, std::vect
     static std::mt19937 eng(rd()); // Seed the generator
     static std::uniform_real_distribution<float> color(-1.0f, 1.0f); // Random color distribution
 
-    for(int i = 0; i < 5; i++) {
+    for(int i = 0; i < NUMBER_OF_CIRCLES_SPAWNED; i++) {
        
         positions.push_back(-0.95f); // X position
-        positions.push_back(0.95f - i * 0.05f); // Y position
+        positions.push_back(0.95f - SRC_HEIGHT * (i * radius) * 0.005f); // Y position
         lastPositions.push_back(-0.95f); // X position
-        lastPositions.push_back(0.95f - i * 0.05f); // Y position
+        lastPositions.push_back(0.95f - SRC_HEIGHT * (i * radius) * 0.005f); // Y position
 
         acceleration.push_back(0.0f);     // 0 m/s^2 on X
-        acceleration.push_back(-3.0f);    // gravity on Y (increased for visibility)
+        acceleration.push_back(-5.0f);    // gravity on Y (increased for visibility)
 
         radiusColorData.push_back(radius);
         radiusColorData.push_back(1.0f); // Random color R
